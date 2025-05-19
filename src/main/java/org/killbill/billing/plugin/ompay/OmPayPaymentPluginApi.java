@@ -92,9 +92,7 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
         String clientToken;
         try {
             final String clientTokenUrl = config.getApiBaseUrlWithMerchant() + "/client_token";
-            Map<String, Object> bodyMap = new HashMap<>();
-            bodyMap.put("grant_type", "client_credentials");
-            String requestBody = objectMapper.writeValueAsString(bodyMap);
+            String requestBody = "'grant_type=client_credentials'";
 
             logger.info("Requesting OMPay client token from: {}", clientTokenUrl);
             OmPayHttpClient.OmPayHttpResponse response = httpClient.doPost(clientTokenUrl, requestBody, config.getBasicAuthHeader(), "application/json");

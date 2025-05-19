@@ -14,6 +14,7 @@ import org.jooby.Result;
 import org.jooby.Results;
 import org.jooby.Status;
 import org.jooby.mvc.GET;
+import org.jooby.mvc.Local;
 import org.jooby.mvc.Path;
 import org.killbill.billing.osgi.libs.killbill.OSGIKillbillAPI;
 import org.killbill.billing.osgi.libs.killbill.OSGIKillbillClock;
@@ -23,6 +24,7 @@ import org.killbill.billing.payment.plugin.api.PaymentPluginApiException;
 import org.killbill.billing.plugin.api.PluginCallContext;
 import org.killbill.billing.plugin.core.PluginServlet;
 import org.killbill.billing.tenant.api.Tenant;
+import org.killbill.billing.util.callcontext.CallContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,49 +50,22 @@ public class OmPayFormServlet extends PluginServlet {
 
     @GET
     public Result getFormDescriptor(final HttpServletRequest request,
-                                    @Named("killbill_tenant") final Optional<Tenant> tenantOpt) {
-        final String kbAccountIdStr = request.getParameter("kbAccountId");
-
-        if (kbAccountIdStr == null || kbAccountIdStr.isEmpty()) {
-            logger.warn("Missing required parameter: kbAccountId");
-            return Results.with("Required parameter 'kbAccountId' missing", Status.BAD_REQUEST)
-                    .header("Content-Type", "text/plain");
-        }
-
+                                    @Named("kbAccountId") final UUID kbAccountId,
+                                    @Local @Named("killbill_tenant") final Tenant tenant) {
         try {
-            UUID kbAccountId = UUID.fromString(kbAccountIdStr);
-
-            // Optional parameters
-            ImmutableList.Builder<PluginProperty> propertiesBuilder = ImmutableList.builder();
-
-            // Add any parameters from the query string as plugin properties
-            request.getParameterMap().forEach((key, values) -> {
-                if (values != null && values.length > 0 && !key.equals("kbAccountId")) {
-                    propertiesBuilder.add(new PluginProperty(key, values[0], false));
-                }
-            });
-
-            final PluginCallContext callContext = new PluginCallContext(
-                    OmPayActivator.PLUGIN_NAME,
-                    clock.getClock().getUTCNow(),
-                    UUID.randomUUID(),
-                    tenantOpt.map(Tenant::getId).orElse(null)
-            );
+            final CallContext context = new PluginCallContext(OmPayActivator.PLUGIN_NAME,
+                    clock.getClock().getUTCNow(), kbAccountId, tenant.getId());
 
             // Call the plugin API to build the form descriptor
             HostedPaymentPageFormDescriptor descriptor = paymentPluginApi.buildFormDescriptor(
                     kbAccountId,
                     null,
-                    propertiesBuilder.build(),
-                    callContext
+                    null,
+                    context
             );
 
             return Results.with(descriptor, Status.CREATED).type("application/json");
 
-        } catch (IllegalArgumentException e) {
-            logger.warn("Invalid UUID format for kbAccountId: {}", kbAccountIdStr);
-            return Results.with("Invalid UUID format for kbAccountId", Status.BAD_REQUEST)
-                    .header("Content-Type", "text/plain");
         } catch (PaymentPluginApiException e) {
             logger.error("Error building form descriptor", e);
             return Results.with("Error: " + e.getMessage(), Status.SERVER_ERROR)
