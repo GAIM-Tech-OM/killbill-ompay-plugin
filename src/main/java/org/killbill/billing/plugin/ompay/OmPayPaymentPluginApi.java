@@ -10,6 +10,7 @@ import org.killbill.billing.osgi.libs.killbill.OSGIKillbillAPI;
 import org.killbill.billing.osgi.libs.killbill.OSGIKillbillClock; // Correct Clock type
 import org.killbill.billing.payment.api.PaymentMethodPlugin;
 import org.killbill.billing.payment.api.PluginProperty;
+import org.killbill.billing.payment.api.TransactionStatus;
 import org.killbill.billing.payment.api.TransactionType;
 import org.killbill.billing.payment.plugin.api.*;
 import org.killbill.billing.plugin.api.payment.PluginGatewayNotification; // Using this specific type
@@ -101,7 +102,7 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
 
             if (response.isSuccess() && response.getResponseMap() != null && response.getResponseMap().containsKey("accessToken")) {
                 clientToken = (String) response.getResponseMap().get("accessToken");
-                logger.info("Successfully retrieved OMPay client token.");
+                logger.info("Successfully retrieved OMPay client token");
             } else {
                 String errorMsg = "Failed to get OMPay client token. Status: " + response.getStatusCode() + ", Body: " + response.getResponseBody();
                 logger.error(errorMsg);
@@ -112,133 +113,29 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
             throw new PaymentPluginApiException("OMPay Network Error", "Exception retrieving client token: " + e.getMessage());
         }
 
+        // Get Kill Bill base URL from properties or configuration
         String killbillBaseUrl = findPluginPropertyValue(PROPERTY_KILLBILL_BASE_URL, pluginProperties, config.getKillbillBaseUrl());
         if (Strings.isNullOrEmpty(killbillBaseUrl)) {
-            logger.error("KillBill base URL is not configured for OMPay plugin.");
-            throw new PaymentPluginApiException("Configuration Error", "KillBill base URL is required.");
+            logger.error("KillBill base URL is not configured for OMPay plugin");
+            throw new PaymentPluginApiException("Configuration Error", "KillBill base URL is required");
         }
+
+        // Determine environment (sandbox or production)
+        boolean isSandbox = config.isTestMode();
+
+        // Form action URL for the payment form submission
         final String formActionUrl = killbillBaseUrl + "/plugins/" + OmPayActivator.PLUGIN_NAME + "/process-nonce";
 
-        String amount = findPluginPropertyValue(PROPERTY_AMOUNT, customFields, "0.00");
-        String currency = findPluginPropertyValue(PROPERTY_CURRENCY, customFields, "USD");
-        String kbPaymentIdString = findPluginPropertyValue(PROPERTY_KB_PAYMENT_ID, customFields, UUID.randomUUID().toString());
-        String kbTransactionIdString = findPluginPropertyValue(PROPERTY_KB_TRANSACTION_ID, customFields, UUID.randomUUID().toString());
-        String paymentIntent = findPluginPropertyValue(PROPERTY_PAYMENT_INTENT, customFields, "purchase");
-
-
-        final String formHtml = generateOmPayFormHtml(formActionUrl, clientToken, kbAccountId.toString(), kbPaymentIdString, kbTransactionIdString, amount, currency, paymentIntent);
-
+        // Build form properties with everything the frontend needs to render the form
         final List<PluginProperty> formProperties = new LinkedList<>();
         formProperties.add(new PluginProperty(PROPERTY_OMPAY_CLIENT_TOKEN, clientToken, false));
         formProperties.add(new PluginProperty(PROPERTY_OMPAY_FORM_ACTION_URL, formActionUrl, false));
-        formProperties.add(new PluginProperty(PROPERTY_OMPAY_FORM_HTML_CONTENT, formHtml, false));
         formProperties.add(new PluginProperty(PROPERTY_KB_ACCOUNT_ID, kbAccountId.toString(), false));
-        formProperties.add(new PluginProperty(PROPERTY_KB_PAYMENT_ID, kbPaymentIdString, false));
-        formProperties.add(new PluginProperty(PROPERTY_KB_TRANSACTION_ID, kbTransactionIdString, false));
-        formProperties.add(new PluginProperty(PROPERTY_AMOUNT, amount, false));
-        formProperties.add(new PluginProperty(PROPERTY_CURRENCY, currency, false));
-        formProperties.add(new PluginProperty(PROPERTY_PAYMENT_INTENT, paymentIntent, false));
-
+        formProperties.add(new PluginProperty("is_sandbox", Boolean.toString(isSandbox), false));
 
         return new PluginHostedPaymentPageFormDescriptor(kbAccountId, formActionUrl, formProperties);
     }
 
-    private String generateOmPayFormHtml(String formActionUrl, String clientToken, String kbAccountId, String kbPaymentId, String kbTransactionId, String amount, String currency, String paymentIntent) {
-        return "<style>\n" +
-                "    .ompay-form-control-one-line {\n" +
-                "        height: 40px; max-height: 40px; box-sizing: border-box; padding: 5px;\n" +
-                "        background-color: #fff; border-radius: 5px; width: auto; float: left; margin-right: 5px;\n" +
-                "    }\n" +
-                "    .payment-form-one-line {\n" +
-                "        margin: auto; width: 80%; padding: 10px; display: flex; flex-direction: column; align-items: center;\n" +
-                "    }\n" +
-                "    .ompay-card-form-one-line {\n" +
-                "        border: 1px solid #00396a; border-radius: 6px; height: auto; padding: 4px;\n" +
-                "        box-shadow: rgba(9, 30, 66, 0.25) 0px 4px 8px -2px, rgba(9, 30, 66, 0.08) 0px 0px 0px 1px;\n" +
-                "        display: flex; align-items: center; margin-bottom: 15px;\n" +
-                "    }\n" +
-                "    #ompay-card-number-one-line { width: 180px; }\n" +
-                "    #ompay-expiration-month-one-line { width: 50px; }\n" +
-                "    #ompay-expiration-year-one-line { width: 50px; }\n" +
-                "    #slash { margin-top: 8px; width: 10px; color: darkgrey; text-align: center; }\n" +
-                "    #ompay-cvv-one-line { width: 60px; }\n" +
-                "    .button-container-one-line { padding-top: 10px; width: 100%; max-width: 350px; }\n" +
-                "    #idsubmit-one-line {\n" +
-                "        width: 100%; height: 35px; border-radius: 5px; background: #0066A2;\n" +
-                "        color: white; border-style: outset; border-color: #0066A2; font: bold 15px arial, sans-serif; text-shadow: none;\n" +
-                "    }\n" +
-                "    #idsubmit-one-line:hover {\n" +
-                "        background: #016ABC; color: #fff; border: 1px solid #eee; border-radius: 5px;\n" +
-                "        box-shadow: 5px 5px 5px #eee; text-shadow: none;\n" +
-                "    }\n" +
-                "    @media screen and (max-width: 600px) {\n" +
-                "        .payment-form-one-line { width: 95%; }\n" +
-                "        .ompay-card-form-one-line { flex-direction: column; height: auto; }\n" +
-                "        .ompay-form-control-one-line { width: 90%; margin-bottom: 5px; }\n" +
-                "        #slash { display: none; }\n" +
-                "    }\n" +
-                "</style>\n" +
-                "<script src=\"https://assets.ompay.com/web/1.0.0/js/client.min.js\"></script>\n" +
-                "<script src=\"https://assets.ompay.com/web/1.0.0/js/hosted-fields.min.js\"></script>\n" +
-                "<form id=\"ompay-payment-form\" method=\"post\" action=\"" + formActionUrl + "\">\n" +
-                "    <input type=\"hidden\" name=\"" + PROPERTY_KB_ACCOUNT_ID + "\" value=\"" + kbAccountId + "\" />\n" +
-                "    <input type=\"hidden\" name=\"" + PROPERTY_KB_PAYMENT_ID + "\" value=\"" + kbPaymentId + "\" />\n" +
-                "    <input type=\"hidden\" name=\"" + PROPERTY_KB_TRANSACTION_ID + "\" value=\"" + kbTransactionId + "\" />\n" +
-                "    <input type=\"hidden\" name=\"" + PROPERTY_AMOUNT + "\" value=\"" + amount + "\" />\n" +
-                "    <input type=\"hidden\" name=\"" + PROPERTY_CURRENCY + "\" value=\"" + currency + "\" />\n" +
-                "    <input type=\"hidden\" name=\"" + PROPERTY_PAYMENT_INTENT + "\" value=\"" + paymentIntent + "\" />\n" +
-                "    <div class=\"payment-form-one-line\">\n" +
-                "        <div class=\"ompay-card-form-one-line\">\n" +
-                "            <div class=\"ompay-form-control-one-line\" id=\"ompay-card-number-one-line\"></div>\n" +
-                "            <div class=\"ompay-form-control-one-line\" id=\"ompay-expiration-month-one-line\"></div>\n" +
-                "            <div class=\"ompay-form-control-one-line\" id=\"slash\">/</div>\n" +
-                "            <div class=\"ompay-form-control-one-line\" id=\"ompay-expiration-year-one-line\"></div>\n" +
-                "            <div class=\"ompay-form-control-one-line\" id=\"ompay-cvv-one-line\"></div>\n" +
-                "        </div>\n" +
-                "        <div class=\"button-container-one-line\">\n" +
-                "            <input id=\"ompay-nonce\" name=\"payment_method_nonce\" type=\"hidden\" />\n" +
-                "            <input type=\"submit\" value=\"Pay Now\" id=\"idsubmit-one-line\" />\n" +
-                "        </div>\n" +
-                "    </div>\n" +
-                "</form>\n" +
-                "<script>\n" +
-                "    var form = document.querySelector('#ompay-payment-form');\n" +
-                "    var btnsubmit = document.querySelector('input[type=\"submit\"]');\n" +
-                "    var client_token = '" + clientToken + "';\n" +
-                "    mpgate.client.create({\n" +
-                "        authorization: client_token,\n" +
-                "        debug: true\n" +
-                "    }, function (err, clientInstance) {\n" +
-                "        if (err) { console.error('Client Create Error:', err); alert('Error initializing payment form.'); return; }\n" +
-                "        createHostedFields(clientInstance);\n" +
-                "    });\n" +
-                "    var hostedField;\n" +
-                "    function createHostedFields(clientInstance) {\n" +
-                "        mpgate.hostedFields.create({\n" +
-                "            client: clientInstance,\n" +
-                "            fields: {\n" +
-                "                number: { selector: '#ompay-card-number-one-line', placeholder: 'Card Number' },\n" +
-                "                expirationMonth: { selector: '#ompay-expiration-month-one-line', placeholder: 'MM' },\n" +
-                "                expirationYear: { selector: '#ompay-expiration-year-one-line', placeholder: 'YY' },\n" +
-                "                cvv: { selector: '#ompay-cvv-one-line', placeholder: 'CVV' }\n" +
-                "            }\n" +
-                "        }, function (err, hostedFieldsInstance) {\n" +
-                "            if (err) { console.error('Hosted Fields Error:',err); alert('Error setting up card fields.'); return; }\n" +
-                "            hostedField = hostedFieldsInstance;\n" +
-                "            form.addEventListener('submit', formSubmitEvent, false);\n" +
-                "        });\n" +
-                "    }\n" +
-                "    var formSubmitEvent = function (event) {\n" +
-                "        event.preventDefault();\n" +
-                "        btnsubmit.setAttribute('disabled', 'disabled');\n" +
-                "        hostedField.tokenize(function (err, payload) {\n" +
-                "            if (err) { console.error('Tokenize Error:', err); alert('Error processing card: ' + (err.message || 'Unknown error') ); btnsubmit.removeAttribute('disabled'); return; }\n" +
-                "            document.querySelector('#ompay-nonce').value = payload.nonce;\n" +
-                "            form.submit();\n" +
-                "        });\n" +
-                "    };\n" +
-                "</script>";
-    }
 
     @Override
     public PaymentTransactionInfoPlugin purchasePayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext context) throws PaymentPluginApiException {
@@ -564,91 +461,158 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
         logger.info("Processing OMPay notification: {}", notificationBody);
         try {
             Map<String, Object> notificationMap = objectMapper.readValue(notificationBody, new TypeReference<Map<String, Object>>() {});
+
+            // Extract core notification data
             String resourceType = (String) notificationMap.get("resource_type");
             String kind = (String) notificationMap.get("kind");
+            String notificationId = (String) notificationMap.get("id");
             Map<String, Object> resource = (Map<String, Object>) notificationMap.get("resource");
 
-            if ("payment".equals(resourceType) && resource != null) {
+            logger.info("Notification: id={}, type={}, kind={}", notificationId, resourceType, kind);
+
+            if (resource == null) {
+                logger.warn("Notification resource is null for notification ID: {}", notificationId);
+                return new PluginGatewayNotification(notificationBody);
+            }
+
+            if ("payment".equals(resourceType)) {
                 String ompayTransactionId = (String) resource.get("id");
                 String ompayState = (String) resource.get("state");
+                String ompayReferenceId = (String) resource.get("reference_id");
 
-                if (Strings.isNullOrEmpty(ompayTransactionId) || Strings.isNullOrEmpty(ompayState)) {
-                    logger.warn("Received OMPay payment notification with missing id or state: {}", notificationBody);
-                    throw new PaymentPluginApiException("Invalid Notification", "Missing id or state in payment notification.");
+                if (Strings.isNullOrEmpty(ompayTransactionId)) {
+                    logger.warn("Received OMPay payment notification with missing id: {}", notificationBody);
+                    throw new PaymentPluginApiException("Invalid Notification", "Missing id in payment notification.");
                 }
 
+                // Try to find the transaction in our database
                 OmpayResponsesRecord record = dao.getResponseByOmPayTransactionId(ompayTransactionId, context.getTenantId());
-                if (record == null) {
-                    logger.warn("Received notification for unknown OMPay transaction ID: {}", ompayTransactionId);
-                    return new PluginGatewayNotification(notificationBody); // Uses constructor (String entity)
+
+                // If not found by transaction ID, try reference ID (for captures, refunds, etc.)
+                if (record == null && !Strings.isNullOrEmpty(ompayReferenceId)) {
+                    logger.info("Transaction ID {} not found, trying reference ID {}", ompayTransactionId, ompayReferenceId);
+                    record = dao.getResponseByOmPayTransactionId(ompayReferenceId, context.getTenantId());
                 }
 
-                Account killbillAccount = killbillAPI.getAccountUserApi().getAccountById(UUID.fromString(record.getKbAccountId()), context);
+                if (record == null) {
+                    // Still not found - this might be a notification for a transaction we don't know about
+                    logger.warn("Received notification for unknown OMPay transaction ID: {} and reference ID: {}",
+                            ompayTransactionId, ompayReferenceId);
+                    return new PluginGatewayNotification(notificationBody);
+                }
+
+                UUID kbAccountId = UUID.fromString(record.getKbAccountId());
                 UUID kbPaymentId = UUID.fromString(record.getKbPaymentId());
                 UUID kbTransactionId = UUID.fromString(record.getKbPaymentTransactionId());
                 PaymentPluginStatus newKbStatus = mapOmpayStatusToKillBill(ompayState);
 
+                // Extract the result and additional data from the notification
+                Map<String, Object> resultMap = (Map<String, Object>) resource.get("result");
+                String resultCode = resultMap != null ? (String) resultMap.get("code") : null;
+                String resultDescription = resultMap != null ? (String) resultMap.get("description") : null;
+
+                // Get current transaction info to check if status has changed
                 PluginPaymentTransactionInfoPlugin currentTxnInfo = dao.toPaymentTransactionInfoPlugin(record);
-                if (currentTxnInfo.getStatus() != newKbStatus && currentTxnInfo.getStatus() == PaymentPluginStatus.PENDING) {
+
+                if (currentTxnInfo.getStatus() != newKbStatus) {
                     logger.info("Updating transaction {} for OMPay ID {} from {} to {} based on notification kind: {}",
                             kbTransactionId, ompayTransactionId, currentTxnInfo.getStatus(), newKbStatus, kind);
 
-                    Map<String, Object> updatedAdditionalData = objectMapper.readValue(record.getAdditionalData(), new TypeReference<Map<String,Object>>() {});
+                    // Update our database with the new status and details
+                    Map<String, Object> updatedAdditionalData;
+                    try {
+                        updatedAdditionalData = objectMapper.readValue(record.getAdditionalData(),
+                                new TypeReference<Map<String,Object>>() {});
+                    } catch (JsonProcessingException e) {
+                        updatedAdditionalData = new HashMap<>();
+                    }
+
+                    // Update with the latest information
                     updatedAdditionalData.put("state", ompayState);
                     updatedAdditionalData.put("notification_kind", kind);
-                    if (resource.get("result") != null) {
-                        updatedAdditionalData.put("result", resource.get("result"));
+                    updatedAdditionalData.put("notification_id", notificationId);
+                    updatedAdditionalData.put("notification_processed_time", DateTime.now().toString());
+
+                    if (resultMap != null) {
+                        updatedAdditionalData.put("result", resultMap);
                     }
-                    dao.updateResponseAdditionalData(record.getRecordId(), objectMapper.writeValueAsString(updatedAdditionalData));
 
-                    // Call Kill Bill API to notify of state change
-                    // This method can throw PaymentApiException, which needs to be handled.
-                    killbillAPI.getPaymentApi().notifyPendingTransactionOfStateChanged(
-                            killbillAccount,
-                            kbTransactionId,
-                            (newKbStatus == PaymentPluginStatus.PROCESSED), // isSuccess boolean
-                            context
-                    );
-                    logger.info("Notified Kill Bill of status change for transaction {}", kbTransactionId);
+                    // If we have transaction details like amount, update them too
+                    if (resource.get("transaction") instanceof Map) {
+                        Map<String, Object> transactionMap = (Map<String, Object>) resource.get("transaction");
+                        if (transactionMap.get("amount") instanceof Map) {
+                            updatedAdditionalData.put("transaction", transactionMap);
+                        }
+                    }
 
+                    // Save updated data to database
+                    try {
+                        dao.updateResponseAdditionalData(record.getRecordId(),
+                                objectMapper.writeValueAsString(updatedAdditionalData));
+                    } catch (Exception e) {
+                        logger.error("Error updating additional data for transaction {}: {}",
+                                kbTransactionId, e.getMessage(), e);
+                    }
+
+                    // Call Kill Bill API to notify of state change if transaction was pending
+                    if (currentTxnInfo.getStatus() == PaymentPluginStatus.PENDING) {
+                        try {
+                            Account killbillAccount = killbillAPI.getAccountUserApi().getAccountById(kbAccountId, context);
+                            killbillAPI.getPaymentApi().notifyPendingTransactionOfStateChanged(
+                                    killbillAccount,
+                                    kbTransactionId,
+                                    (newKbStatus == PaymentPluginStatus.PROCESSED), // isSuccess boolean
+                                    context
+                            );
+                            logger.info("Notified Kill Bill of status change for transaction {}", kbTransactionId);
+                        } catch (AccountApiException | org.killbill.billing.payment.api.PaymentApiException e) {
+                            logger.error("Error notifying Kill Bill of transaction state change: {}", e.getMessage(), e);
+                            throw new PaymentPluginApiException("Kill Bill API Error",
+                                    "Failed to notify Kill Bill of transaction state change: " + e.getMessage());
+                        }
+                    } else {
+                        logger.info("Transaction {} was not in PENDING state (was {}), not notifying Kill Bill",
+                                kbTransactionId, currentTxnInfo.getStatus());
+                    }
                 } else {
-                    logger.info("Notification for OMPay ID {} (kbTxnId {}). Current KB status {} (from db) matches OMPay new status {} (mapped from '{}') or not PENDING. No update sent to KillBill. Kind: {}",
-                            ompayTransactionId, kbTransactionId, currentTxnInfo.getStatus(), newKbStatus, ompayState, kind);
+                    logger.info("Notification for OMPay ID {} (kbTxnId {}). No status change: current={}, new={} (from '{}').",
+                            ompayTransactionId, kbTransactionId, currentTxnInfo.getStatus(), newKbStatus, ompayState);
                 }
 
+                // Create plugin properties with notification details for the return value
                 List<PluginProperty> notificationProperties = ImmutableList.of(
                         new PluginProperty("ompay_transaction_id", ompayTransactionId, false),
+                        new PluginProperty("ompay_reference_id", ompayReferenceId, false),
                         new PluginProperty("processed_kb_transaction_id", kbTransactionId.toString(), false),
-                        new PluginProperty("new_status", newKbStatus.toString(), false)
+                        new PluginProperty("notification_kind", kind, false),
+                        new PluginProperty("notification_id", notificationId, false),
+                        new PluginProperty("new_status", newKbStatus.toString(), false),
+                        new PluginProperty("result_code", resultCode, false),
+                        new PluginProperty("result_description", resultDescription, false)
                 );
+
                 return new PluginGatewayNotification.Builder<>()
                         .withKbPaymentId(kbPaymentId)
                         .withEntity(notificationBody)
                         .withProperties(notificationProperties)
                         .build();
-
             } else {
-                logger.warn("Received OMPay notification of unhandled resource_type '{}' or empty resource: {}", resourceType, notificationBody);
+                logger.warn("Received OMPay notification of unhandled resource_type '{}': {}",
+                        resourceType, notificationBody);
             }
         } catch (JsonProcessingException e) {
             logger.error("Failed to parse OMPay notification JSON: {}", notificationBody, e);
-            throw new PaymentPluginApiException("Notification Parse Error", "Invalid JSON in notification: " + e.getMessage());
+            throw new PaymentPluginApiException("Notification Parse Error",
+                    "Invalid JSON in notification: " + e.getMessage());
         } catch (SQLException e) {
-            logger.error("Database error while processing OMPay notification for body {}:", notificationBody, e);
-            throw new PaymentPluginApiException("DB Error", "Failed to process notification due to DB error: " + e.getMessage());
-        } catch (AccountApiException e) { // Catch specific Kill Bill API exception
-            logger.error("Kill Bill Account API error while processing notification for body {}:", notificationBody, e);
-            throw new PaymentPluginApiException("Kill Bill Account API Error", "Failed to retrieve account details: " + e.getMessage());
-        } catch (org.killbill.billing.payment.api.PaymentApiException e) { // Catch the specific exception from notifyPendingTransactionOfStateChanged
-            logger.error("Kill Bill Payment API error while notifying state change for notification {}:", notificationBody, e);
-            // Re-throw as PaymentPluginApiException, as this method is allowed to throw it.
-            throw new PaymentPluginApiException("Kill Bill Payment API Error", "Failed to notify Kill Bill of transaction state change: " + e.getMessage());
+            logger.error("Database error while processing OMPay notification: {}", e.getMessage(), e);
+            throw new PaymentPluginApiException("DB Error",
+                    "Failed to process notification due to DB error: " + e.getMessage());
         }
+
         // Fallback if not handled or error before specific returns
         return new PluginGatewayNotification(notificationBody);
     }
-
-    // Add to OmPayPaymentPluginApi.java
 
     @Override
     public PaymentTransactionInfoPlugin voidPayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final Iterable<PluginProperty> properties, final CallContext context) throws PaymentPluginApiException {

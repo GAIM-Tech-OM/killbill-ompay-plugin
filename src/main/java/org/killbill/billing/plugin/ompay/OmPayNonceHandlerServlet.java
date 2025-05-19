@@ -44,6 +44,7 @@ import java.util.UUID;
 import java.util.Optional;
 
 @Singleton
+@Path("/process-nonce")
 public class OmPayNonceHandlerServlet extends PluginServlet {
 
     private static final Logger logger = LoggerFactory.getLogger(OmPayNonceHandlerServlet.class);
@@ -70,51 +71,68 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
     }
 
     @POST
-    @Path("/process-nonce")
     public Result handleNonce(final HttpServletRequest request,
                               @Named("killbill_tenant") final Optional<Tenant> tenantOpt) {
         final PluginCallContext callContext = createPluginCallContext("process-nonce", tenantOpt.orElse(null), request);
         final OmPayConfigProperties config = configurationHandler.getConfigurable(callContext.getTenantId());
 
-        final String paymentMethodNonce = request.getParameter("payment_method_nonce");
-        final String kbAccountIdString = request.getParameter(OmPayPaymentPluginApi.PROPERTY_KB_ACCOUNT_ID);
-        final String kbPaymentIdString = request.getParameter(OmPayPaymentPluginApi.PROPERTY_KB_PAYMENT_ID);
-        final String kbTransactionIdString = request.getParameter(OmPayPaymentPluginApi.PROPERTY_KB_TRANSACTION_ID);
-        final String amountString = request.getParameter(OmPayPaymentPluginApi.PROPERTY_AMOUNT);
-        final String currencyString = request.getParameter(OmPayPaymentPluginApi.PROPERTY_CURRENCY);
-        final String paymentIntent = request.getParameter(OmPayPaymentPluginApi.PROPERTY_PAYMENT_INTENT);
-
-        if (Strings.isNullOrEmpty(paymentMethodNonce) || Strings.isNullOrEmpty(kbAccountIdString) ||
-                Strings.isNullOrEmpty(kbPaymentIdString) || Strings.isNullOrEmpty(kbTransactionIdString) ||
-                Strings.isNullOrEmpty(amountString) || Strings.isNullOrEmpty(currencyString) || Strings.isNullOrEmpty(paymentIntent)) {
-            logger.warn("Missing required parameters for nonce processing.");
-            return Results.with("Required parameters missing.", Status.BAD_REQUEST)
-                    .header("Content-Type", "text/plain");
-        }
-
-        UUID kbAccountId = UUID.fromString(kbAccountIdString);
-        UUID kbPaymentId = UUID.fromString(kbPaymentIdString);
-        UUID kbTransactionId = UUID.fromString(kbTransactionIdString);
-        BigDecimal amount = new BigDecimal(amountString);
-        Currency currency = Currency.valueOf(currencyString.toUpperCase());
-        TransactionType transactionType = "authorize".equalsIgnoreCase(paymentIntent) ? TransactionType.AUTHORIZE : TransactionType.PURCHASE;
-
-
         try {
+            // Extract payment method nonce from POST body
+            final String paymentMethodNonce = request.getParameter("payment_method_nonce");
+            if (Strings.isNullOrEmpty(paymentMethodNonce)) {
+                logger.warn("Missing payment_method_nonce in request");
+                return Results.with("Required parameter 'payment_method_nonce' missing", Status.BAD_REQUEST)
+                        .header("Content-Type", "text/plain");
+            }
+
+            // Extract query parameters
+            final String kbAccountIdString = request.getParameter("kb_account_id");
+            final String amountString = request.getParameter("amount");
+            final String currencyString = request.getParameter("currency");
+            final String paymentIntent = request.getParameter("payment_intent");
+            final String returnUrl = request.getParameter("return_url");
+            final String cancelUrl = request.getParameter("cancel_url");
+            final boolean force3ds = Boolean.parseBoolean(request.getParameter("force_3ds"));
+
+            // Validate required parameters
+            if (Strings.isNullOrEmpty(kbAccountIdString) || Strings.isNullOrEmpty(amountString) ||
+                    Strings.isNullOrEmpty(currencyString)) {
+                logger.warn("Missing required parameters for nonce processing");
+                return Results.with("Required parameters missing (kb_account_id, amount, currency)", Status.BAD_REQUEST)
+                        .header("Content-Type", "text/plain");
+            }
+
+            // Parse parameters
+            UUID kbAccountId = UUID.fromString(kbAccountIdString);
+            BigDecimal amount = new BigDecimal(amountString);
+            Currency currency = Currency.valueOf(currencyString.toUpperCase());
+            TransactionType transactionType = "sale".equalsIgnoreCase(paymentIntent) ?
+                    TransactionType.PURCHASE : TransactionType.AUTHORIZE;
+
+            // Generate payment and transaction IDs if not provided
+            UUID kbPaymentId = UUID.randomUUID();
+            UUID kbTransactionId = UUID.randomUUID();
+
+            // Retrieve account details
             Account kbAccount = killbillAPI.getAccountUserApi().getAccountById(kbAccountId, callContext);
 
+            // Build payment payload for OMPay
             Map<String, Object> paymentPayload = new HashMap<>();
-            paymentPayload.put("intent", "sale".equalsIgnoreCase(paymentIntent) ? "auth" : "sale");
+            paymentPayload.put("intent", "sale".equalsIgnoreCase(paymentIntent) ? "sale" : "auth");
             paymentPayload.put("merchant_initiated", false);
 
+            // Payer section
             Map<String, Object> payer = new HashMap<>();
             payer.put("payment_type", "CC");
+
+            // Funding instrument - using the payment nonce
             Map<String, Object> fundingInstrument = new HashMap<>();
             Map<String, Object> creditCardNonceObj = new HashMap<>();
             creditCardNonceObj.put("nonce", paymentMethodNonce);
             fundingInstrument.put("credit_card_nonce", creditCardNonceObj);
             payer.put("funding_instrument", fundingInstrument);
 
+            // Payer info and billing address
             Map<String, Object> payerInfo = new HashMap<>();
             payerInfo.put("email", kbAccount.getEmail());
             Map<String, Object> billingAddress = new HashMap<>();
@@ -124,41 +142,70 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
             billingAddress.put("country_code", kbAccount.getCountry());
             billingAddress.put("postal_code", kbAccount.getPostalCode());
             billingAddress.put("state", kbAccount.getStateOrProvince());
+
+            // Add phone if available
+            if (!Strings.isNullOrEmpty(kbAccount.getPhone())) {
+                Map<String, Object> phone = new HashMap<>();
+                phone.put("number", kbAccount.getPhone());
+                billingAddress.put("phone", phone);
+            }
+
             payerInfo.put("billing_address", billingAddress);
             payer.put("payer_info", payerInfo);
             paymentPayload.put("payer", payer);
 
+            // Payee section
             Map<String, Object> payee = new HashMap<>();
             payee.put("merchant_id", config.getMerchantId());
             paymentPayload.put("payee", payee);
 
+            // Transaction section
             Map<String, Object> transaction = new HashMap<>();
-            transaction.put("type", 1);
+            transaction.put("type", "2"); // Type 2 is for subscriptions/recurring (per OMPay docs)
+
+            // Amount details
             Map<String, Object> amountDetails = new HashMap<>();
             amountDetails.put("currency", currency.name());
             amountDetails.put("total", amount.toPlainString());
             transaction.put("amount", amountDetails);
-            transaction.put("description", "Payment for KillBill: " + kbPaymentIdString);
-            transaction.put("invoice_number", kbPaymentIdString);
+
+            // Transaction description and invoice number
+            transaction.put("description", "Payment for KillBill Account: " + kbAccountId);
+            transaction.put("invoice_number", kbPaymentId.toString());
+
+            // Add return_url and cancel_url if provided
+            if (!Strings.isNullOrEmpty(returnUrl)) {
+                transaction.put("return_url", returnUrl);
+            }
+            if (!Strings.isNullOrEmpty(cancelUrl)) {
+                transaction.put("cancel_url", cancelUrl);
+            }
+
+            transaction.put("mode", force3ds ? 2 : 1);
+
             paymentPayload.put("transaction", transaction);
 
+            // Convert payload to JSON
             String jsonPayload = objectMapper.writeValueAsString(paymentPayload);
             logger.debug("OMPay /payment request payload: {}", jsonPayload);
 
+            // Send payment request to OMPay
             OmPayHttpClient.OmPayHttpResponse omPayResponse = httpClient.doPost(
                     config.getApiBaseUrlWithMerchant() + "/payment",
                     jsonPayload,
                     config.getBasicAuthHeader(),
                     "application/json");
 
+            // Handle API response
             Map<String, Object> omPayResponseMap = omPayResponse.getResponseMap();
-            // ... (error handling for omPayResponseMap == null) ...
             if (omPayResponseMap == null) {
-                logger.error("OMPay response could not be parsed or was empty. Status: {}, Body: {}", omPayResponse.getStatusCode(), omPayResponse.getResponseBody());
+                logger.error("OMPay response could not be parsed or was empty. Status: {}, Body: {}",
+                        omPayResponse.getStatusCode(), omPayResponse.getResponseBody());
                 throw new PaymentPluginApiException("OMPay API Error", "Invalid response from OMPay gateway.");
             }
             logger.info("OMPay /payment response: {}", omPayResponse.getResponseBody());
 
+            // Extract important fields from the response
             String ompayTransactionId = (String) omPayResponseMap.get("id");
             String ompayReferenceId = (String) omPayResponseMap.get("reference_id");
             String ompayState = (String) omPayResponseMap.get("state");
@@ -168,39 +215,63 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
             String authenticateUrl = omPayResult != null ? (String) omPayResult.get("authenticate_url") : null;
             String redirectUrlFromResult = omPayResult != null ? (String) omPayResult.get("redirect_url") : null;
 
+            // For 3DS flows, we need to check if redirection is required
+            boolean requires3DS = "requires_action".equalsIgnoreCase(ompayState) ||
+                    !Strings.isNullOrEmpty(authenticateUrl) ||
+                    !Strings.isNullOrEmpty(redirectUrlFromResult);
 
-            if ("requires_action".equalsIgnoreCase(ompayState) || !Strings.isNullOrEmpty(authenticateUrl) || !Strings.isNullOrEmpty(redirectUrlFromResult)) {
-                String finalRedirectUrl = !Strings.isNullOrEmpty(authenticateUrl) ? authenticateUrl : redirectUrlFromResult;
-                logger.info("OMPay requires further action (e.g., 3DS). Redirecting to: {}", finalRedirectUrl);
+            if (requires3DS) {
+                String finalRedirectUrl = !Strings.isNullOrEmpty(authenticateUrl) ?
+                        authenticateUrl : redirectUrlFromResult;
+                logger.info("OMPay requires further action (3DS). Redirecting to: {}", finalRedirectUrl);
+
+                // Extract payer ID for recording
                 String extractedPayerIdFor3DS = null;
                 Map<String, Object> payerResponseFor3DS = (Map<String, Object>) omPayResponseMap.get("payer");
                 if (payerResponseFor3DS != null && payerResponseFor3DS.get("payer_info") instanceof Map) {
                     Map<String,Object> payerInfoRespFor3DS = (Map<String,Object>) payerResponseFor3DS.get("payer_info");
                     extractedPayerIdFor3DS = (String) payerInfoRespFor3DS.get("id");
                 }
+
+                // Store the pending 3DS transaction
                 try {
                     dao.addResponse(kbAccountId, kbPaymentId, kbTransactionId, transactionType, amount, currency,
                             ompayTransactionId, ompayReferenceId, extractedPayerIdFor3DS, null,
                             finalRedirectUrl, finalRedirectUrl,
-                            omPayResponseMap, clock.getClock().getUTCNow(),  callContext.getTenantId());
+                            omPayResponseMap, clock.getClock().getUTCNow(), callContext.getTenantId());
                 } catch (SQLException | JsonProcessingException dbEx) {
-                    logger.error("DB Error storing pending 3DS transaction state for OMPay ID {}: {}", ompayTransactionId, dbEx.getMessage());
+                    logger.error("DB Error storing pending 3DS transaction state for OMPay ID {}: {}",
+                            ompayTransactionId, dbEx.getMessage());
                 }
-                return Results.redirect(finalRedirectUrl);
+
+                // Return the redirect URL to the client
+                Map<String, Object> responseData = new HashMap<>();
+                responseData.put("requires_3ds", true);
+                responseData.put("redirect_url", finalRedirectUrl);
+                responseData.put("ompay_transaction_id", ompayTransactionId);
+                responseData.put("kb_payment_id", kbPaymentId.toString());
+                responseData.put("kb_transaction_id", kbTransactionId.toString());
+
+                return Results.json(responseData).status(Status.OK);
             }
 
-
+            // For non-3DS flows, record the payment
             List<PluginProperty> transactionProperties = new ArrayList<>();
-            // ... (populate transactionProperties as before) ...
             transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_TRANSACTION_ID_PROP, ompayTransactionId, false));
-            if (ompayReferenceId != null) transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_REFERENCE_ID_PROP, ompayReferenceId, false));
+            if (ompayReferenceId != null) {
+                transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_REFERENCE_ID_PROP, ompayReferenceId, false));
+            }
             transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_PAYMENT_STATE_PROP, ompayState, false));
-            if (ompayResultCode != null) transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_RESULT_CODE_PROP, ompayResultCode, false));
-            if (ompayResultDescription != null) transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_RESULT_DESC_PROP, ompayResultDescription, false));
+            if (ompayResultCode != null) {
+                transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_RESULT_CODE_PROP, ompayResultCode, false));
+            }
+            if (ompayResultDescription != null) {
+                transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_RESULT_DESC_PROP, ompayResultDescription, false));
+            }
             transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.RAW_OMPAY_RESPONSE_PROP, omPayResponse.getResponseBody(), false));
 
-
-            String extractedOmpayPayerId = null; // Renamed to avoid conflict with method-scoped variable
+            // Extract payer and card details
+            String extractedOmpayPayerId = null;
             String ompayCardId = null;
             Map<String, Object> cardDetailsForPm = new HashMap<>();
 
@@ -208,10 +279,9 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
             if (payerResponse != null) {
                 if (payerResponse.get("payer_info") instanceof Map) {
                     Map<String,Object> payerInfoResp = (Map<String,Object>) payerResponse.get("payer_info");
-                    extractedOmpayPayerId = (String) payerInfoResp.get("id"); // Extract Payer ID
+                    extractedOmpayPayerId = (String) payerInfoResp.get("id");
                     if(extractedOmpayPayerId != null) {
                         transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_PAYER_ID_PROP, extractedOmpayPayerId, false));
-                        // Add to cardDetailsForPm as well so it gets into PaymentMethodPlugin properties
                         cardDetailsForPm.put(OmPayPaymentPluginApi.OMPAY_PAYER_ID_PROP, extractedOmpayPayerId);
                     }
                 }
@@ -222,7 +292,7 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
                         ompayCardId = (String) ccResp.get("id");
                         if(ompayCardId != null) {
                             transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_CARD_ID_PROP, ompayCardId, false));
-                            cardDetailsForPm.put(OmPayPaymentPluginApi.OMPAY_CARD_ID_PROP, ompayCardId); // Though this is externalPaymentMethodId
+                            cardDetailsForPm.put(OmPayPaymentPluginApi.OMPAY_CARD_ID_PROP, ompayCardId);
                         }
                         if(ccResp.get("last4") != null) cardDetailsForPm.put("ompay_card_last4", ccResp.get("last4"));
                         if(ccResp.get("type") != null) cardDetailsForPm.put("ompay_card_type", ccResp.get("type"));
@@ -233,29 +303,17 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
                 }
             }
 
-            if (extractedOmpayPayerId != null) {
-                boolean payerIdPropExists = false;
-                for(PluginProperty p : transactionProperties) {
-                    if(OmPayPaymentPluginApi.OMPAY_PAYER_ID_PROP.equals(p.getKey())) {
-                        payerIdPropExists = true;
-                        break;
-                    }
-                }
-                if(!payerIdPropExists) {
-                    transactionProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_PAYER_ID_PROP, extractedOmpayPayerId, false));
-                }
-            }
-
-
-            // Call the appropriate PaymentPluginApi method
+            // Record the payment
             if (transactionType == TransactionType.AUTHORIZE) {
-                paymentPluginApi.authorizePayment(kbAccountId, kbPaymentId, kbTransactionId, null, amount, currency, transactionProperties, callContext);
+                paymentPluginApi.authorizePayment(kbAccountId, kbPaymentId, kbTransactionId, null,
+                        amount, currency, transactionProperties, callContext);
             } else {
-                paymentPluginApi.purchasePayment(kbAccountId, kbPaymentId, kbTransactionId, null, amount, currency, transactionProperties, callContext);
+                paymentPluginApi.purchasePayment(kbAccountId, kbPaymentId, kbTransactionId, null,
+                        amount, currency, transactionProperties, callContext);
             }
 
+            // If payment is successful and we have card details, save the payment method
             PaymentPluginStatus finalKbStatus = paymentPluginApi.mapOmpayStatusToKillBill(ompayState);
-
             if (finalKbStatus == PaymentPluginStatus.PROCESSED && !Strings.isNullOrEmpty(ompayCardId)) {
                 UUID kbPaymentMethodId = UUID.randomUUID();
                 List<PluginProperty> pmProps = new ArrayList<>();
@@ -264,38 +322,47 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
                         pmProps.add(new PluginProperty(entry.getKey(), entry.getValue(), false));
                     }
                 }
+
                 PaymentMethodPlugin paymentMethodPlugin = new OmPayPaymentMethodPlugin(
                         kbPaymentMethodId,
                         ompayCardId,
                         true,
                         pmProps
                 );
-                // Pass transactionProperties to addPaymentMethod, it might contain OMPAY_PAYER_ID_PROP if not already in pmProps
-                paymentPluginApi.addPaymentMethod(kbAccountId, kbPaymentMethodId, paymentMethodPlugin, true, transactionProperties, callContext);
+
+                // Save the payment method
+                paymentPluginApi.addPaymentMethod(kbAccountId, kbPaymentMethodId, paymentMethodPlugin,
+                        true, transactionProperties, callContext);
             }
 
-            // ... (redirect logic remains the same) ...
-            String returnUrl = config.getKillbillBaseUrl() + "/plugins/ompay-plugin/payment-result" +
-                    "?status=" + finalKbStatus +
-                    "&kbPaymentId=" + kbPaymentIdString +
-                    "&kbTransactionId=" + kbTransactionIdString +
-                    "&ompayTransactionId=" + ompayTransactionId;
-            logger.info("Payment processed for OMPay ID {}. Redirecting to: {}", ompayTransactionId, returnUrl);
-            return Results.redirect(returnUrl);
+            // Return success response with payment details
+            Map<String, Object> responseData = new HashMap<>();
+            responseData.put("success", true);
+            responseData.put("requires_3ds", false);
+            responseData.put("ompay_transaction_id", ompayTransactionId);
+            responseData.put("ompay_state", ompayState);
+            responseData.put("kb_payment_id", kbPaymentId.toString());
+            responseData.put("kb_transaction_id", kbTransactionId.toString());
+
+            return Results.json(responseData).status(Status.OK);
 
         } catch (PaymentPluginApiException | AccountApiException | IOException e) {
-            logger.error("Error processing OMPay nonce for account {}:", kbAccountIdString, e);
-            return Results.with("Error processing payment: " + e.getMessage(), Status.SERVER_ERROR)
-                    .header("Content-Type", "text/plain");
+            logger.error("Error processing OMPay nonce:", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error_message", e.getMessage());
+            return Results.json(errorResponse).status(Status.SERVER_ERROR);
         } catch (Exception e) {
-            logger.error("Unexpected error processing OMPay nonce for account {}:", kbAccountIdString, e);
-            return Results.with("An unexpected server error occurred: " + e.getMessage(), Status.SERVER_ERROR)
-                    .header("Content-Type", "text/plain");
+            logger.error("Unexpected error processing OMPay nonce:", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error_message", "An unexpected server error occurred");
+            return Results.json(errorResponse).status(Status.SERVER_ERROR);
         }
     }
 
     private PluginCallContext createPluginCallContext(final String apiName, final Tenant tenant, final HttpServletRequest request) {
         final UUID tenantId = (tenant != null) ? tenant.getId() : null;
-        return new PluginCallContext(OmPayActivator.PLUGIN_NAME, clock.getClock().getUTCNow(),  UUID.randomUUID(), tenantId);
+        return new PluginCallContext(OmPayActivator.PLUGIN_NAME, clock.getClock().getUTCNow(), UUID.randomUUID(), tenantId);
     }
 }
