@@ -2,19 +2,19 @@ package org.killbill.billing.plugin.ompay;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import org.joda.time.DateTime; // Ensure this is the Joda-Time DateTime
+import org.joda.time.DateTime;
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.account.api.AccountApiException;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.osgi.libs.killbill.OSGIKillbillAPI;
-import org.killbill.billing.osgi.libs.killbill.OSGIKillbillClock; // Correct Clock type
+import org.killbill.billing.osgi.libs.killbill.OSGIKillbillClock;
 import org.killbill.billing.payment.api.PaymentMethodPlugin;
 import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.payment.api.TransactionStatus;
 import org.killbill.billing.payment.api.TransactionType;
 import org.killbill.billing.payment.plugin.api.*;
-import org.killbill.billing.plugin.api.payment.PluginGatewayNotification; // Using this specific type
-import org.killbill.billing.plugin.api.payment.PluginHostedPaymentPageFormDescriptor; // Using this specific type
+import org.killbill.billing.plugin.api.payment.PluginGatewayNotification;
+import org.killbill.billing.plugin.api.payment.PluginHostedPaymentPageFormDescriptor;
 import org.killbill.billing.plugin.api.payment.PluginPaymentTransactionInfoPlugin;
 
 import org.killbill.billing.plugin.ompay.client.OmPayHttpClient;
@@ -24,7 +24,6 @@ import org.killbill.billing.plugin.ompay.dao.gen.tables.records.OmpayResponsesRe
 import org.killbill.billing.util.callcontext.CallContext;
 import org.killbill.billing.util.callcontext.TenantContext;
 import org.killbill.billing.util.entity.Pagination;
-// Remove 'import org.killbill.clock.Clock;' if OSGIKillbillClock is used everywhere
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -434,27 +433,104 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
 
     @Override
     public Pagination<PaymentTransactionInfoPlugin> searchPayments(String searchKey, Long offset, Long limit, Iterable<PluginProperty> properties, TenantContext context) throws PaymentPluginApiException {
-        return new Pagination<PaymentTransactionInfoPlugin>() {
-            @Override public Long getCurrentOffset() { return offset; }
-            @Override public Long getNextOffset() { return null; }
-            @Override public Long getMaxNbRecords() { return 0L; }
-            @Override public Long getTotalNbRecords() { return 0L; }
-            @Override public java.util.Iterator<PaymentTransactionInfoPlugin> iterator() { return ImmutableList.<PaymentTransactionInfoPlugin>of().iterator(); }
-            @Override public void close() throws IOException { /* No-op for this simple in-memory/empty pagination */ }
-        };
+        if (Strings.isNullOrEmpty(searchKey)) {
+            logger.warn("No search key provided for payment search");
+            return getEmptyPaymentTransactionPagination(offset);
+        }
+
+        logger.info("Searching for payments with key: {}, offset: {}, limit: {}", searchKey, offset, limit);
+
+        try {
+            final List<PaymentTransactionInfoPlugin> results = dao.searchPayments(searchKey, offset, limit, context.getTenantId());
+
+            return new Pagination<PaymentTransactionInfoPlugin>() {
+                @Override public Long getCurrentOffset() { return offset; }
+                @Override public Long getNextOffset() {
+                    return results.size() < limit ? null : offset + limit;
+                }
+                @Override public Long getMaxNbRecords() { return (long) limit; }
+                @Override public Long getTotalNbRecords() {
+                    try {
+                        return dao.getPaymentCount(searchKey, context.getTenantId());
+                    } catch (SQLException e) {
+                        logger.warn("Error getting total payment count", e);
+                        return null;
+                    }
+                }
+                @Override public Iterator<PaymentTransactionInfoPlugin> iterator() {
+                    return results.iterator();
+                }
+                @Override public void close() throws IOException { /* No-op */ }
+            };
+        } catch (SQLException e) {
+            logger.error("Error searching payments: {}", e.getMessage(), e);
+            throw new PaymentPluginApiException("Search Error", "Failed to search payments: " + e.getMessage());
+        }
     }
 
     @Override
     public Pagination<PaymentMethodPlugin> searchPaymentMethods(String searchKey, Long offset, Long limit, Iterable<PluginProperty> properties, TenantContext context) throws PaymentPluginApiException {
+        if (Strings.isNullOrEmpty(searchKey)) {
+            logger.warn("No search key provided for payment method search");
+            return getEmptyPaymentMethodPagination(offset);
+        }
+
+        logger.info("Searching for payment methods with key: {}, offset: {}, limit: {}", searchKey, offset, limit);
+
+        try {
+            final List<PaymentMethodPlugin> results = dao.searchPaymentMethods(searchKey, offset, limit, context.getTenantId());
+
+            return new Pagination<PaymentMethodPlugin>() {
+                @Override public Long getCurrentOffset() { return offset; }
+                @Override public Long getNextOffset() {
+                    return results.size() < limit ? null : offset + limit;
+                }
+                @Override public Long getMaxNbRecords() { return (long) limit; }
+                @Override public Long getTotalNbRecords() {
+                    try {
+                        return dao.getPaymentMethodCount(searchKey, context.getTenantId());
+                    } catch (SQLException e) {
+                        logger.warn("Error getting total payment method count", e);
+                        return null;
+                    }
+                }
+                @Override public Iterator<PaymentMethodPlugin> iterator() {
+                    return results.iterator();
+                }
+                @Override public void close() throws IOException { /* No-op */ }
+            };
+        } catch (SQLException e) {
+            logger.error("Error searching payment methods: {}", e.getMessage(), e);
+            throw new PaymentPluginApiException("Search Error", "Failed to search payment methods: " + e.getMessage());
+        }
+    }
+
+    private Pagination<PaymentMethodPlugin> getEmptyPaymentMethodPagination(final Long offset) {
         return new Pagination<PaymentMethodPlugin>() {
             @Override public Long getCurrentOffset() { return offset; }
             @Override public Long getNextOffset() { return null; }
             @Override public Long getMaxNbRecords() { return 0L; }
             @Override public Long getTotalNbRecords() { return 0L; }
-            @Override public java.util.Iterator<PaymentMethodPlugin> iterator() { return ImmutableList.<PaymentMethodPlugin>of().iterator(); }
+            @Override public Iterator<PaymentMethodPlugin> iterator() {
+                return ImmutableList.<PaymentMethodPlugin>of().iterator();
+            }
             @Override public void close() throws IOException { /* No-op */ }
         };
     }
+
+    private Pagination<PaymentTransactionInfoPlugin> getEmptyPaymentTransactionPagination(final Long offset) {
+        return new Pagination<PaymentTransactionInfoPlugin>() {
+            @Override public Long getCurrentOffset() { return offset; }
+            @Override public Long getNextOffset() { return null; }
+            @Override public Long getMaxNbRecords() { return 0L; }
+            @Override public Long getTotalNbRecords() { return 0L; }
+            @Override public Iterator<PaymentTransactionInfoPlugin> iterator() {
+                return ImmutableList.<PaymentTransactionInfoPlugin>of().iterator();
+            }
+            @Override public void close() throws IOException { /* No-op */ }
+        };
+    }
+
 
     @Override
     public GatewayNotification processNotification(final String notificationBody, final Iterable<PluginProperty> properties, final CallContext context) throws PaymentPluginApiException {

@@ -10,11 +10,14 @@ import org.jooq.Condition;
 import org.jooq.DSLContext;
 import org.jooq.impl.DSL; // Import for DSL.using
 import org.killbill.billing.catalog.api.Currency;
+import org.killbill.billing.payment.api.PaymentMethodPlugin;
 import org.killbill.billing.payment.api.PluginProperty; // Ensure this is the correct import
 import org.killbill.billing.payment.api.TransactionType;
 import org.killbill.billing.payment.plugin.api.PaymentTransactionInfoPlugin;
 import org.killbill.billing.plugin.api.payment.PluginPaymentTransactionInfoPlugin;
 import org.killbill.billing.plugin.dao.payment.PluginPaymentDao; // Correct base class
+import org.killbill.billing.plugin.ompay.OmPayPaymentMethodPlugin;
+import org.killbill.billing.plugin.ompay.OmPayPaymentPluginApi;
 import org.killbill.billing.plugin.ompay.dao.gen.tables.OmpayPaymentMethods;
 import org.killbill.billing.plugin.ompay.dao.gen.tables.OmpayResponses;
 import org.killbill.billing.plugin.ompay.dao.gen.tables.records.OmpayPaymentMethodsRecord;
@@ -511,5 +514,157 @@ public class OmPayDao extends PluginPaymentDao<
             }
             return null;
         });
+    }
+
+    /**
+     * Search for payments matching a search key across various fields.
+     *
+     * @param searchKey The search term to look for
+     * @param offset Pagination offset
+     * @param limit Maximum records to return
+     * @param kbTenantId The tenant ID
+     * @return List of payment transaction info plugins matching the search criteria
+     * @throws SQLException If a database error occurs
+     */
+    public List<PaymentTransactionInfoPlugin> searchPayments(final String searchKey, final Long offset, final Long limit, final UUID kbTenantId) throws SQLException {
+        return execute(dataSource.getConnection(), (Connection conn) -> {
+            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+
+            // Search across multiple fields - using ILIKE for case-insensitive search in PostgreSQL
+            Condition searchCondition = OMPAY_RESPONSES.KB_PAYMENT_ID.likeIgnoreCase("%" + searchKey + "%")
+                    .or(OMPAY_RESPONSES.KB_PAYMENT_TRANSACTION_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_RESPONSES.OMPAY_TRANSACTION_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_RESPONSES.OMPAY_REFERENCE_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_RESPONSES.OMPAY_PAYER_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_RESPONSES.ADDITIONAL_DATA.likeIgnoreCase("%" + searchKey + "%"));
+
+            return dslContext.selectFrom(OMPAY_RESPONSES)
+                    .where(searchCondition)
+                    .and(OMPAY_RESPONSES.KB_TENANT_ID.eq(kbTenantId.toString()))
+                    .orderBy(OMPAY_RESPONSES.CREATED_DATE.desc())
+                    .limit(limit)
+                    .offset(offset)
+                    .fetch(this::toPaymentTransactionInfoPlugin);
+        });
+    }
+
+    /**
+     * Get total count of payments matching a search key.
+     *
+     * @param searchKey The search term to look for
+     * @param kbTenantId The tenant ID
+     * @return Count of matching records
+     * @throws SQLException If a database error occurs
+     */
+    public Long getPaymentCount(final String searchKey, final UUID kbTenantId) throws SQLException {
+        return execute(dataSource.getConnection(), (Connection conn) -> {
+            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+
+            Condition searchCondition = OMPAY_RESPONSES.KB_PAYMENT_ID.likeIgnoreCase("%" + searchKey + "%")
+                    .or(OMPAY_RESPONSES.KB_PAYMENT_TRANSACTION_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_RESPONSES.OMPAY_TRANSACTION_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_RESPONSES.OMPAY_REFERENCE_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_RESPONSES.OMPAY_PAYER_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_RESPONSES.ADDITIONAL_DATA.likeIgnoreCase("%" + searchKey + "%"));
+
+            return dslContext.selectCount()
+                    .from(OMPAY_RESPONSES)
+                    .where(searchCondition)
+                    .and(OMPAY_RESPONSES.KB_TENANT_ID.eq(kbTenantId.toString()))
+                    .fetchOne(0, Long.class);
+        });
+    }
+
+    /**
+     * Search for payment methods matching a search key.
+     *
+     * @param searchKey The search term to look for
+     * @param offset Pagination offset
+     * @param limit Maximum records to return
+     * @param kbTenantId The tenant ID
+     * @return List of payment method plugins matching the search criteria
+     * @throws SQLException If a database error occurs
+     */
+    public List<PaymentMethodPlugin> searchPaymentMethods(final String searchKey, final Long offset, final Long limit, final UUID kbTenantId) throws SQLException {
+        return execute(dataSource.getConnection(), (Connection conn) -> {
+            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+
+            // Search across multiple fields
+            Condition searchCondition = OMPAY_PAYMENT_METHODS.KB_PAYMENT_METHOD_ID.likeIgnoreCase("%" + searchKey + "%")
+                    .or(OMPAY_PAYMENT_METHODS.KB_ACCOUNT_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_PAYMENT_METHODS.OMPAY_CREDIT_CARD_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_PAYMENT_METHODS.OMPAY_PAYER_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_PAYMENT_METHODS.ADDITIONAL_DATA.likeIgnoreCase("%" + searchKey + "%"));
+
+            List<OmpayPaymentMethodsRecord> records = dslContext.selectFrom(OMPAY_PAYMENT_METHODS)
+                    .where(searchCondition)
+                    .and(OMPAY_PAYMENT_METHODS.KB_TENANT_ID.eq(kbTenantId.toString()))
+                    .and(OMPAY_PAYMENT_METHODS.IS_DELETED.ne((short) 1))
+                    .orderBy(OMPAY_PAYMENT_METHODS.CREATED_DATE.desc())
+                    .limit(limit)
+                    .offset(offset)
+                    .fetch();
+
+            return records.stream()
+                    .map(this::toPaymentMethodPlugin)
+                    .collect(Collectors.toList());
+        });
+    }
+
+    /**
+     * Get total count of payment methods matching a search key.
+     *
+     * @param searchKey The search term to look for
+     * @param kbTenantId The tenant ID
+     * @return Count of matching records
+     * @throws SQLException If a database error occurs
+     */
+    public Long getPaymentMethodCount(final String searchKey, final UUID kbTenantId) throws SQLException {
+        return execute(dataSource.getConnection(), (Connection conn) -> {
+            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+
+            Condition searchCondition = OMPAY_PAYMENT_METHODS.KB_PAYMENT_METHOD_ID.likeIgnoreCase("%" + searchKey + "%")
+                    .or(OMPAY_PAYMENT_METHODS.KB_ACCOUNT_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_PAYMENT_METHODS.OMPAY_CREDIT_CARD_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_PAYMENT_METHODS.OMPAY_PAYER_ID.likeIgnoreCase("%" + searchKey + "%"))
+                    .or(OMPAY_PAYMENT_METHODS.ADDITIONAL_DATA.likeIgnoreCase("%" + searchKey + "%"));
+
+            return dslContext.selectCount()
+                    .from(OMPAY_PAYMENT_METHODS)
+                    .where(searchCondition)
+                    .and(OMPAY_PAYMENT_METHODS.KB_TENANT_ID.eq(kbTenantId.toString()))
+                    .and(OMPAY_PAYMENT_METHODS.IS_DELETED.ne((short) 1))
+                    .fetchOne(0, Long.class);
+        });
+    }
+
+    /**
+     * Convert payment method record to payment method plugin.
+     */
+    private PaymentMethodPlugin toPaymentMethodPlugin(final OmpayPaymentMethodsRecord record) {
+        Map<String, Object> additionalData = new HashMap<>();
+        if (!Strings.isNullOrEmpty(record.getAdditionalData())) {
+            try {
+                additionalData = objectMapper.readValue(record.getAdditionalData(), new TypeReference<Map<String, Object>>() {});
+            } catch (JsonProcessingException e) {
+                logger.warn("Could not parse additionalData for payment method {}: {}", record.getKbPaymentMethodId(), e.getMessage());
+            }
+        }
+
+        List<PluginProperty> pmProperties = additionalData.entrySet().stream()
+                .map(entry -> new PluginProperty(entry.getKey(), entry.getValue(), false))
+                .collect(Collectors.toList());
+
+        // Add payer ID if available
+        if (!Strings.isNullOrEmpty(record.getOmpayPayerId())) {
+            pmProperties.add(new PluginProperty(OmPayPaymentPluginApi.OMPAY_PAYER_ID_PROP, record.getOmpayPayerId(), false));
+        }
+
+        return new OmPayPaymentMethodPlugin(
+                UUID.fromString(record.getKbPaymentMethodId()),
+                record.getOmpayCreditCardId(),
+                record.getIsDefault() == 1,
+                pmProperties
+        );
     }
 }

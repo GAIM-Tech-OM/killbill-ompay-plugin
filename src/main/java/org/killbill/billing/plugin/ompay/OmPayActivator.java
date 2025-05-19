@@ -54,6 +54,7 @@ public class OmPayActivator extends KillbillActivatorBase {
                 .withRouteClass(OmPayHealthcheckServlet.class)
                 .withRouteClass(OmPayNonceHandlerServlet.class)
                 .withRouteClass(OmPayWebhookServlet.class)
+                .withRouteClass(OmPayFormServlet.class)
                 .withService(pluginApi)
                 .withService(clock)
                 .withService(dao)
