@@ -89,6 +89,7 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
             throws PaymentPluginApiException {
         final OmPayConfigProperties config = configurationHandler.getConfigurable(context.getTenantId());
 
+        // Get client token from OMPay
         String clientToken;
         try {
             final String clientTokenUrl = config.getApiBaseUrlWithMerchant() + "/client_token";
@@ -117,21 +118,63 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
             throw new PaymentPluginApiException("Configuration Error", "KillBill base URL is required");
         }
 
-        // Determine environment (sandbox or production)
-        boolean isSandbox = config.isTestMode();
-
         // Form action URL for the payment form submission
         final String formActionUrl = killbillBaseUrl + "/plugins/" + OmPayActivator.PLUGIN_NAME + "/process-nonce";
 
-        // Build form properties with everything the frontend needs to render the form
+        // Determine environment (sandbox or production)
+        boolean isSandbox = config.isTestMode();
+
+        // Extract fields from pluginProperties
+        String amount = null;
+        String currency = null;
+        String paymentIntent = "sale"; // Default to sale if not specified
+        String returnUrl = null;
+        String cancelUrl = null;
+
+        if (customFields != null) {
+            for (PluginProperty field : customFields) {
+                if ("amount".equals(field.getKey())) {
+                    amount = (String) field.getValue();
+                } else if ("currency".equals(field.getKey())) {
+                    currency = (String) field.getValue();
+                } else if ("paymentIntent".equals(field.getKey())) {
+                    paymentIntent = (String) field.getValue();
+                } else if ("returnUrl".equals(field.getKey())) {
+                    returnUrl = (String) field.getValue();
+                } else if ("cancelUrl".equals(field.getKey())) {
+                    cancelUrl = (String) field.getValue();
+                }
+            }
+        }
+
+        // Build form properties with everything the frontend needs
         final List<PluginProperty> formProperties = new LinkedList<>();
+
+        // Add hidden fields that should be passed to the form but not modified by user
         formProperties.add(new PluginProperty(PROPERTY_OMPAY_CLIENT_TOKEN, clientToken, false));
         formProperties.add(new PluginProperty(PROPERTY_OMPAY_FORM_ACTION_URL, formActionUrl, false));
         formProperties.add(new PluginProperty(PROPERTY_KB_ACCOUNT_ID, kbAccountId.toString(), false));
-        formProperties.add(new PluginProperty("is_sandbox", Boolean.toString(isSandbox), false));
+        formProperties.add(new PluginProperty("isSandbox", Boolean.toString(isSandbox), false));
+
+        if (amount != null) {
+            formProperties.add(new PluginProperty("amount", amount, false));
+        }
+        if (currency != null) {
+            formProperties.add(new PluginProperty("currency", currency, false));
+        }
+        if (paymentIntent != null) {
+            formProperties.add(new PluginProperty("paymentIntent", paymentIntent, false));
+        }
+        if (returnUrl != null) {
+            formProperties.add(new PluginProperty("returnUrl", returnUrl, false));
+        }
+        if (cancelUrl != null) {
+            formProperties.add(new PluginProperty("cancelUrl", cancelUrl, false));
+        }
 
         return new PluginHostedPaymentPageFormDescriptor(kbAccountId, formActionUrl, formProperties);
     }
+
 
 
     @Override

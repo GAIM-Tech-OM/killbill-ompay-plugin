@@ -1,7 +1,7 @@
 package org.killbill.billing.plugin.ompay;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -28,6 +28,7 @@ import org.killbill.billing.util.callcontext.CallContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 
 @Singleton
@@ -53,13 +54,49 @@ public class OmPayFormServlet extends PluginServlet {
                                     @Named("kbAccountId") final UUID kbAccountId,
                                     @Local @Named("killbill_tenant") final Tenant tenant) {
         try {
+            // Extract query parameters for the form fields
+            final String amount = request.getParameter("amount");
+            final String currency = request.getParameter("currency");
+            final String paymentIntent = request.getParameter("paymentIntent");
+            final String returnUrl = request.getParameter("returnUrl");
+            final String cancelUrl = request.getParameter("cancelUrl");
+
+            logger.info("Building form descriptor for account {}: amount={}, currency={}, paymentIntent={}",
+                    kbAccountId, amount, currency, paymentIntent);
+
             final CallContext context = new PluginCallContext(OmPayActivator.PLUGIN_NAME,
                     clock.getClock().getUTCNow(), kbAccountId, tenant.getId());
+
+            // Build custom field properties with the parameters
+            List<PluginProperty> customFields = new ArrayList<>();
+
+            if (!Strings.isNullOrEmpty(amount)) {
+                customFields.add(new PluginProperty("amount", amount, false));
+            }
+
+            if (!Strings.isNullOrEmpty(currency)) {
+                customFields.add(new PluginProperty("currency", currency, false));
+            }
+
+            // Default to "sale" if not provided for payment intent
+            if (!Strings.isNullOrEmpty(paymentIntent)) {
+                customFields.add(new PluginProperty("paymentIntent", paymentIntent, false));
+            } else {
+                customFields.add(new PluginProperty("paymentIntent", "sale", false));
+            }
+
+            if (!Strings.isNullOrEmpty(returnUrl)) {
+                customFields.add(new PluginProperty("returnUrl", returnUrl, false));
+            }
+
+            if (!Strings.isNullOrEmpty(cancelUrl)) {
+                customFields.add(new PluginProperty("cancelUrl", cancelUrl, false));
+            }
 
             // Call the plugin API to build the form descriptor
             HostedPaymentPageFormDescriptor descriptor = paymentPluginApi.buildFormDescriptor(
                     kbAccountId,
-                    null,
+                    customFields,
                     null,
                     context
             );

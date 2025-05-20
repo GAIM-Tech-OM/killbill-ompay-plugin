@@ -71,34 +71,33 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
     }
 
     @POST
-    public Result handleNonce(final HttpServletRequest request,
-                              @Named("killbill_tenant") final Optional<Tenant> tenantOpt) {
-        final PluginCallContext callContext = createPluginCallContext("process-nonce", tenantOpt.orElse(null), request);
+    public Result handleNonce(final HttpServletRequest request) {
+        final PluginCallContext callContext = createPluginCallContext("process-nonce", null, request);
         final OmPayConfigProperties config = configurationHandler.getConfigurable(callContext.getTenantId());
 
         try {
             // Extract payment method nonce from POST body
-            final String paymentMethodNonce = request.getParameter("payment_method_nonce");
+            final String paymentMethodNonce = request.getParameter("nonce");
             if (Strings.isNullOrEmpty(paymentMethodNonce)) {
-                logger.warn("Missing payment_method_nonce in request");
-                return Results.with("Required parameter 'payment_method_nonce' missing", Status.BAD_REQUEST)
+                logger.warn("Missing nonce in request");
+                return Results.with("Required parameter 'nonce' missing", Status.BAD_REQUEST)
                         .header("Content-Type", "text/plain");
             }
 
             // Extract query parameters
-            final String kbAccountIdString = request.getParameter("kb_account_id");
+            final String kbAccountIdString = request.getParameter("kbAccountId");
             final String amountString = request.getParameter("amount");
             final String currencyString = request.getParameter("currency");
-            final String paymentIntent = request.getParameter("payment_intent");
-            final String returnUrl = request.getParameter("return_url");
-            final String cancelUrl = request.getParameter("cancel_url");
-            final boolean force3ds = Boolean.parseBoolean(request.getParameter("force_3ds"));
+            final String paymentIntent = request.getParameter("paymentIntent");
+            final String returnUrl = request.getParameter("returnUrl");
+            final String cancelUrl = request.getParameter("cancelUrl");
+            final boolean force3ds = Boolean.parseBoolean(request.getParameter("force3ds"));
 
             // Validate required parameters
             if (Strings.isNullOrEmpty(kbAccountIdString) || Strings.isNullOrEmpty(amountString) ||
                     Strings.isNullOrEmpty(currencyString)) {
                 logger.warn("Missing required parameters for nonce processing");
-                return Results.with("Required parameters missing (kb_account_id, amount, currency)", Status.BAD_REQUEST)
+                return Results.with("Required parameters missing (kbAccountId, amount, currency)", Status.BAD_REQUEST)
                         .header("Content-Type", "text/plain");
             }
 

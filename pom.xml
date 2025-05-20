@@ -26,8 +26,8 @@
     <artifactId>ompay-plugin</artifactId>
     <version>0.0.1</version>
     <packaging>bundle</packaging>
-    <name>Kill Bill Stripe plugin</name>
-    <description>Kill Bill Stripe plugin</description>
+    <name>Kill Bill Ompay plugin</name>
+    <description>Kill Bill Ompay plugin</description>
     <url>http://github.com/killbill/killbill-ompay-plugin</url>
     <properties>
         <check.fail-spotbugs>true</check.fail-spotbugs>
