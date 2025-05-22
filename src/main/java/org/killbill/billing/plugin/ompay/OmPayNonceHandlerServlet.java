@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import org.joda.time.DateTime;
+import org.jooby.Request;
 import org.jooby.Result;
 import org.jooby.Results;
 import org.jooby.Status;
@@ -71,13 +72,13 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
     }
 
     @POST
-    public Result handleNonce(final HttpServletRequest request) {
-        final PluginCallContext callContext = createPluginCallContext("process-nonce", null, request);
+    public Result handleNonce(final Request req) {
+        final PluginCallContext callContext = createPluginCallContext("process-nonce", null);
         final OmPayConfigProperties config = configurationHandler.getConfigurable(callContext.getTenantId());
 
         try {
             // Extract payment method nonce from POST body
-            final String paymentMethodNonce = request.getParameter("nonce");
+            final String paymentMethodNonce = req.param("nonce").value();
             if (Strings.isNullOrEmpty(paymentMethodNonce)) {
                 logger.warn("Missing nonce in request");
                 return Results.with("Required parameter 'nonce' missing", Status.BAD_REQUEST)
@@ -85,13 +86,13 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
             }
 
             // Extract query parameters
-            final String kbAccountIdString = request.getParameter("kbAccountId");
-            final String amountString = request.getParameter("amount");
-            final String currencyString = request.getParameter("currency");
-            final String paymentIntent = request.getParameter("paymentIntent");
-            final String returnUrl = request.getParameter("returnUrl");
-            final String cancelUrl = request.getParameter("cancelUrl");
-            final boolean force3ds = Boolean.parseBoolean(request.getParameter("force3ds"));
+            final String kbAccountIdString = req.param("kbAccountId").value();
+            final String amountString = req.param("amount").value();
+            final String currencyString = req.param("currency").value();
+            final String paymentIntent = req.param("paymentIntent").value();
+            final String returnUrl = req.param("returnUrl").value();
+            final String cancelUrl = req.param("cancelUrl").value();
+            final boolean force3ds = Boolean.parseBoolean(req.param("force3ds").value());
 
             // Validate required parameters
             if (Strings.isNullOrEmpty(kbAccountIdString) || Strings.isNullOrEmpty(amountString) ||
@@ -135,20 +136,6 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
             Map<String, Object> payerInfo = new HashMap<>();
             payerInfo.put("email", kbAccount.getEmail());
             Map<String, Object> billingAddress = new HashMap<>();
-            billingAddress.put("line1", kbAccount.getAddress1());
-            billingAddress.put("line2", kbAccount.getAddress2());
-            billingAddress.put("city", kbAccount.getCity());
-            billingAddress.put("country_code", kbAccount.getCountry());
-            billingAddress.put("postal_code", kbAccount.getPostalCode());
-            billingAddress.put("state", kbAccount.getStateOrProvince());
-
-            // Add phone if available
-            if (!Strings.isNullOrEmpty(kbAccount.getPhone())) {
-                Map<String, Object> phone = new HashMap<>();
-                phone.put("number", kbAccount.getPhone());
-                billingAddress.put("phone", phone);
-            }
-
             payerInfo.put("billing_address", billingAddress);
             payer.put("payer_info", payerInfo);
             paymentPayload.put("payer", payer);
@@ -360,7 +347,7 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
         }
     }
 
-    private PluginCallContext createPluginCallContext(final String apiName, final Tenant tenant, final HttpServletRequest request) {
+    private PluginCallContext createPluginCallContext(final String apiName, final Tenant tenant) {
         final UUID tenantId = (tenant != null) ? tenant.getId() : null;
         return new PluginCallContext(OmPayActivator.PLUGIN_NAME, clock.getClock().getUTCNow(), UUID.randomUUID(), tenantId);
     }

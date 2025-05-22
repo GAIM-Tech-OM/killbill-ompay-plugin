@@ -10,6 +10,7 @@ import javax.inject.Named;
 import javax.inject.Singleton;
 import javax.servlet.http.HttpServletRequest;
 
+import org.jooby.Request;
 import org.jooby.Result;
 import org.jooby.Results;
 import org.jooby.Status;
@@ -50,16 +51,22 @@ public class OmPayFormServlet extends PluginServlet {
     }
 
     @GET
-    public Result getFormDescriptor(final HttpServletRequest request,
-                                    @Named("kbAccountId") final UUID kbAccountId,
+    public Result getFormDescriptor(final Request req,
                                     @Local @Named("killbill_tenant") final Tenant tenant) {
         try {
             // Extract query parameters for the form fields
-            final String amount = request.getParameter("amount");
-            final String currency = request.getParameter("currency");
-            final String paymentIntent = request.getParameter("paymentIntent");
-            final String returnUrl = request.getParameter("returnUrl");
-            final String cancelUrl = request.getParameter("cancelUrl");
+            String kbAccountIdStr = req.param("kbAccountId").value(); // Throws Err.Missing if not present
+            String returnUrl = req.param("returnUrl").value();
+            String cancelUrl = req.param("cancelUrl").value();
+            String paymentIntent = req.param("paymentIntent").toOptional().orElse("auth");
+            String currency = req.param("currency").toOptional().orElse("USD");
+            String amount = req.param("amount").toOptional().orElse("0");
+
+            // Validate required parameters
+            if (kbAccountIdStr == null || returnUrl == null || cancelUrl == null) {
+                return Results.with("Missing required query parameters: kbAccountId, returnUrl, cancelUrl").status(Status.BAD_REQUEST);
+            }
+            UUID kbAccountId = UUID.fromString(kbAccountIdStr);
 
             logger.info("Building form descriptor for account {}: amount={}, currency={}, paymentIntent={}",
                     kbAccountId, amount, currency, paymentIntent);

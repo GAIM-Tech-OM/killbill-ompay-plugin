@@ -127,7 +127,7 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
         // Extract fields from pluginProperties
         String amount = null;
         String currency = null;
-        String paymentIntent = "sale"; // Default to sale if not specified
+        String paymentIntent = "auth"; // Default to auth if not specified
         String returnUrl = null;
         String cancelUrl = null;
 
@@ -149,12 +149,11 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
 
         // Build form properties with everything the frontend needs
         final List<PluginProperty> formProperties = new LinkedList<>();
+        final List<PluginProperty> additional = new LinkedList<>();
 
         // Add hidden fields that should be passed to the form but not modified by user
-        formProperties.add(new PluginProperty(PROPERTY_OMPAY_CLIENT_TOKEN, clientToken, false));
-        formProperties.add(new PluginProperty(PROPERTY_OMPAY_FORM_ACTION_URL, formActionUrl, false));
-        formProperties.add(new PluginProperty(PROPERTY_KB_ACCOUNT_ID, kbAccountId.toString(), false));
-        formProperties.add(new PluginProperty("isSandbox", Boolean.toString(isSandbox), false));
+        additional.add(new PluginProperty(PROPERTY_OMPAY_CLIENT_TOKEN, clientToken, false));
+        additional.add(new PluginProperty("isSandbox", Boolean.toString(isSandbox), false));
 
         if (amount != null) {
             formProperties.add(new PluginProperty("amount", amount, false));
@@ -172,7 +171,7 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
             formProperties.add(new PluginProperty("cancelUrl", cancelUrl, false));
         }
 
-        return new PluginHostedPaymentPageFormDescriptor(kbAccountId, formActionUrl, formProperties);
+        return new PluginHostedPaymentPageFormDescriptor(kbAccountId, PluginHostedPaymentPageFormDescriptor.POST, formActionUrl, formProperties, additional);
     }
 
 
