@@ -17,9 +17,11 @@ CREATE TABLE ompay_responses (
     redirect_url TEXT DEFAULT NULL, -- Store result.redirect_url for OTP
     authenticate_url TEXT DEFAULT NULL, -- Store result.authenticate_url for OTP
     additional_data LONGTEXT DEFAULT NULL, -- To store the full JSON response, including state, result.code, result.description etc.
+    ompay_state VARCHAR(32) DEFAULT NULL,
     created_date DATETIME NOT NULL,
     kb_tenant_id CHAR(36) NOT NULL
 );
+CREATE INDEX idx_ompay_responses_status ON ompay_responses(ompay_state);
 CREATE INDEX ompay_responses_kb_payment_id ON ompay_responses(kb_payment_id);
 CREATE INDEX ompay_responses_kb_payment_transaction_id ON ompay_responses(kb_payment_transaction_id);
 CREATE INDEX ompay_responses_ompay_transaction_id ON ompay_responses(ompay_transaction_id);

@@ -15,7 +15,7 @@ import org.jooq.Identity;
 import org.jooq.Index;
 import org.jooq.Name;
 import org.jooq.Record;
-import org.jooq.Row16;
+import org.jooq.Row17;
 import org.jooq.Schema;
 import org.jooq.Table;
 import org.jooq.TableField;
@@ -131,6 +131,11 @@ public class OmpayResponses extends TableImpl<OmpayResponsesRecord> {
      */
     public final TableField<OmpayResponsesRecord, String> KB_TENANT_ID = createField(DSL.name("kb_tenant_id"), SQLDataType.CHAR(36).nullable(false), this, "");
 
+    /**
+     * The column <code>public.ompay_responses.ompay_state</code>.
+     */
+    public final TableField<OmpayResponsesRecord, String> OMPAY_STATE = createField(DSL.name("ompay_state"), SQLDataType.VARCHAR(32).defaultValue(DSL.field("NULL::character varying", SQLDataType.VARCHAR)), this, "");
+
     private OmpayResponses(Name alias, Table<OmpayResponsesRecord> aliased) {
         this(alias, aliased, null);
     }
@@ -211,11 +216,11 @@ public class OmpayResponses extends TableImpl<OmpayResponsesRecord> {
     }
 
     // -------------------------------------------------------------------------
-    // Row16 type methods
+    // Row17 type methods
     // -------------------------------------------------------------------------
 
     @Override
-    public Row16<Integer, String, String, String, String, BigDecimal, String, String, String, String, String, String, String, String, LocalDateTime, String> fieldsRow() {
-        return (Row16) super.fieldsRow();
+    public Row17<Integer, String, String, String, String, BigDecimal, String, String, String, String, String, String, String, String, LocalDateTime, String, String> fieldsRow() {
+        return (Row17) super.fieldsRow();
     }
 }

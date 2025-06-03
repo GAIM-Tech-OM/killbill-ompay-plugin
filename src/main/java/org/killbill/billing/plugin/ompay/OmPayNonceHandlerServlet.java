@@ -173,12 +173,10 @@ public class OmPayNonceHandlerServlet extends PluginServlet {
                     }
                 }
 
-                final String finalRedirectUrl = !Strings.isNullOrEmpty(authenticateUrl) ? authenticateUrl : redirectUrl;
-
-                if (!Strings.isNullOrEmpty(finalRedirectUrl)) {
+                if (!Strings.isNullOrEmpty(redirectUrl)) {
                     responseData.put("requires_3ds", true);
-                    responseData.put("redirect_url", finalRedirectUrl);
-                    logger.info("Payment requires 3DS authentication, redirecting to: {}", finalRedirectUrl);
+                    responseData.put("redirect_url", redirectUrl);
+                    logger.info("Payment requires 3DS authentication, redirecting to: {}", redirectUrl);
 
                     // For web flows, return JSON with redirect URL
                     // The frontend can then redirect the user

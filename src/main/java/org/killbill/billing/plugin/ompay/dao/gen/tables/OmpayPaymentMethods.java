@@ -67,6 +67,11 @@ public class OmpayPaymentMethods extends TableImpl<OmpayPaymentMethodsRecord> {
     public final TableField<OmpayPaymentMethodsRecord, String> KB_PAYMENT_METHOD_ID = createField(DSL.name("kb_payment_method_id"), SQLDataType.CHAR(36).nullable(false), this, "");
 
     /**
+     * The column <code>public.ompay_payment_methods.ompay_payer_id</code>.
+     */
+    public final TableField<OmpayPaymentMethodsRecord, String> OMPAY_PAYER_ID = createField(DSL.name("ompay_payer_id"), SQLDataType.VARCHAR(255).defaultValue(DSL.field("NULL::character varying", SQLDataType.VARCHAR)), this, "");
+
+    /**
      * The column
      * <code>public.ompay_payment_methods.ompay_credit_card_id</code>.
      */
@@ -101,11 +106,6 @@ public class OmpayPaymentMethods extends TableImpl<OmpayPaymentMethodsRecord> {
      * The column <code>public.ompay_payment_methods.kb_tenant_id</code>.
      */
     public final TableField<OmpayPaymentMethodsRecord, String> KB_TENANT_ID = createField(DSL.name("kb_tenant_id"), SQLDataType.CHAR(36).nullable(false), this, "");
-
-    /**
-     * The column <code>public.ompay_payment_methods.ompay_payer_id</code>.
-     */
-    public final TableField<OmpayPaymentMethodsRecord, String> OMPAY_PAYER_ID = createField(DSL.name("ompay_payer_id"), SQLDataType.VARCHAR(255).defaultValue(DSL.field("NULL::character varying", SQLDataType.VARCHAR)), this, "");
 
     private OmpayPaymentMethods(Name alias, Table<OmpayPaymentMethodsRecord> aliased) {
         this(alias, aliased, null);
@@ -149,7 +149,7 @@ public class OmpayPaymentMethods extends TableImpl<OmpayPaymentMethodsRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.OMPAY_PAYMENT_METHODS_KB_PAYMENT_METHOD_ID, Indexes.OMPAY_PAYMENT_METHODS_OMPAY_CREDIT_CARD_ID, Indexes.OMPAY_PAYMENT_METHODS_OMPAY_PAYER_ID);
+        return Arrays.asList(Indexes.OMPAY_PAYMENT_METHODS_KB_PAYMENT_METHOD_ID);
     }
 
     @Override
@@ -193,7 +193,7 @@ public class OmpayPaymentMethods extends TableImpl<OmpayPaymentMethodsRecord> {
     // -------------------------------------------------------------------------
 
     @Override
-    public Row11<Integer, String, String, String, Short, Short, String, LocalDateTime, LocalDateTime, String, String> fieldsRow() {
+    public Row11<Integer, String, String, String, String, Short, Short, String, LocalDateTime, LocalDateTime, String> fieldsRow() {
         return (Row11) super.fieldsRow();
     }
 }

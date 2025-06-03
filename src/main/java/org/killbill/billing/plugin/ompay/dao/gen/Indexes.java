@@ -23,8 +23,6 @@ public class Indexes {
     // -------------------------------------------------------------------------
 
     public static final Index OMPAY_PAYMENT_METHODS_KB_PAYMENT_METHOD_ID = Internal.createIndex(DSL.name("ompay_payment_methods_kb_payment_method_id"), OmpayPaymentMethods.OMPAY_PAYMENT_METHODS, new OrderField[] { OmpayPaymentMethods.OMPAY_PAYMENT_METHODS.KB_PAYMENT_METHOD_ID }, true);
-    public static final Index OMPAY_PAYMENT_METHODS_OMPAY_CREDIT_CARD_ID = Internal.createIndex(DSL.name("ompay_payment_methods_ompay_credit_card_id"), OmpayPaymentMethods.OMPAY_PAYMENT_METHODS, new OrderField[] { OmpayPaymentMethods.OMPAY_PAYMENT_METHODS.OMPAY_CREDIT_CARD_ID }, false);
-    public static final Index OMPAY_PAYMENT_METHODS_OMPAY_PAYER_ID = Internal.createIndex(DSL.name("ompay_payment_methods_ompay_payer_id"), OmpayPaymentMethods.OMPAY_PAYMENT_METHODS, new OrderField[] { OmpayPaymentMethods.OMPAY_PAYMENT_METHODS.OMPAY_PAYER_ID }, false);
     public static final Index OMPAY_RESPONSES_KB_PAYMENT_ID = Internal.createIndex(DSL.name("ompay_responses_kb_payment_id"), OmpayResponses.OMPAY_RESPONSES, new OrderField[] { OmpayResponses.OMPAY_RESPONSES.KB_PAYMENT_ID }, false);
     public static final Index OMPAY_RESPONSES_KB_PAYMENT_TRANSACTION_ID = Internal.createIndex(DSL.name("ompay_responses_kb_payment_transaction_id"), OmpayResponses.OMPAY_RESPONSES, new OrderField[] { OmpayResponses.OMPAY_RESPONSES.KB_PAYMENT_TRANSACTION_ID }, false);
     public static final Index OMPAY_RESPONSES_OMPAY_REFERENCE_ID = Internal.createIndex(DSL.name("ompay_responses_ompay_reference_id"), OmpayResponses.OMPAY_RESPONSES, new OrderField[] { OmpayResponses.OMPAY_RESPONSES.OMPAY_REFERENCE_ID }, false);

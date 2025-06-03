@@ -63,6 +63,7 @@ public class OmPayDao extends PluginPaymentDao<
                             @Nullable final String ompayReferenceId,
                             @Nullable final String ompayPayerId,
                             @Nullable final String ompayCardId,
+                            @Nullable final String ompayState,
                             @Nullable final String redirectUrl,
                             @Nullable final String authenticateUrl,
                             final Map<String, Object> additionalDataMap,
@@ -85,6 +86,7 @@ public class OmPayDao extends PluginPaymentDao<
                             OMPAY_RESPONSES.OMPAY_REFERENCE_ID,
                             OMPAY_RESPONSES.OMPAY_PAYER_ID,
                             OMPAY_RESPONSES.OMPAY_CARD_ID,
+                            OMPAY_RESPONSES.OMPAY_STATE,
                             OMPAY_RESPONSES.REDIRECT_URL,
                             OMPAY_RESPONSES.AUTHENTICATE_URL,
                             OMPAY_RESPONSES.ADDITIONAL_DATA,
@@ -100,6 +102,7 @@ public class OmPayDao extends PluginPaymentDao<
                             ompayReferenceId,
                             ompayPayerId,
                             ompayCardId,
+                            ompayState,
                             redirectUrl,
                             authenticateUrl,
                             additionalData,
@@ -324,40 +327,46 @@ public class OmPayDao extends PluginPaymentDao<
         });
     }
 
-    public void updateResponseAdditionalData(Integer recordId, String additionalData) throws SQLException {
+    public void updateResponseAdditionalData(Integer recordId, String state, String additionalData) throws SQLException {
         execute(dataSource.getConnection(), (Connection conn) -> {
             final DSLContext dslContext = DSL.using(conn, dialect, settings);
             return dslContext.update(OMPAY_RESPONSES)
+                    .set(OMPAY_RESPONSES.OMPAY_STATE, state)
                     .set(OMPAY_RESPONSES.ADDITIONAL_DATA, additionalData)
                     .where(OMPAY_RESPONSES.RECORD_ID.eq(recordId))
                     .execute();
         });
     }
 
-    // Add to OmPayDao.java
+    public OmpayResponsesRecord getLatestSuccessfulTransaction(final UUID kbAccountId, final UUID kbTenantId) throws SQLException {
+        // Define what you consider successful OMPay states
+        final List<String> successfulStates = Arrays.asList("authorised", "captured");
 
-    public OmpayResponsesRecord getLatestSuccessfulTransaction(final UUID kbPaymentId, final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
             final DSLContext dslContext = DSL.using(conn, dialect, settings);
-            // Successful states from OMPay might be "authorised", "captured"
-            // We need to check the 'state' field within the additional_data JSON,
-            // or rely on the status mapping if we had a dedicated status column.
-            // This is complex with current schema. A simpler approach is to find the latest PURCHASE or AUTHORIZE.
-            // For a more accurate "successful", we'd need to parse JSON in SQL or iterate results.
+            logger.info("DAO: Searching for latest successful transaction (ompay_processing_status in {}) for kbAccountId: {}", successfulStates, kbAccountId);
 
-            // Fetching latest transaction of type PURCHASE or AUTHORIZE
-            // and assuming its 'additional_data' reflects a successful OMPay state
-            // This is a simplification. A robust solution needs better status querying.
             List<Condition> conditions = new ArrayList<>();
-            conditions.add(OMPAY_RESPONSES.KB_PAYMENT_ID.eq(kbPaymentId.toString()));
+            conditions.add(OMPAY_RESPONSES.KB_ACCOUNT_ID.eq(kbAccountId.toString()));
             conditions.add(OMPAY_RESPONSES.KB_TENANT_ID.eq(kbTenantId.toString()));
             conditions.add(OMPAY_RESPONSES.TRANSACTION_TYPE.in(TransactionType.PURCHASE.toString(), TransactionType.AUTHORIZE.toString()));
+            // Query directly on the new status column!
+            conditions.add(OMPAY_RESPONSES.OMPAY_STATE.lower().in(successfulStates.stream().map(String::toLowerCase).collect(Collectors.toList())));
 
-            return dslContext.selectFrom(OMPAY_RESPONSES)
+
+            OmpayResponsesRecord record = dslContext.selectFrom(OMPAY_RESPONSES)
                     .where(conditions)
                     .orderBy(OMPAY_RESPONSES.CREATED_DATE.desc(), OMPAY_RESPONSES.RECORD_ID.desc())
                     .limit(1)
                     .fetchOne();
+
+            if (record != null) {
+                logger.info("DAO: Found latest successful transaction: record_id={}, ompay_transaction_id={}, ompay_processing_status={}",
+                        record.getRecordId(), record.getOmpayTransactionId(), record.getOmpayState());
+            } else {
+                logger.warn("DAO: No successful transaction found with ompay_processing_status in {} for kbAccountId: {}", successfulStates, kbAccountId);
+            }
+            return record;
         });
     }
 
@@ -382,12 +391,12 @@ public class OmPayDao extends PluginPaymentDao<
         }
     }
 
-    public void updateResponseByOmPayTxnId(final String ompayTransactionId, final Map<String, Object> newAdditionalDataMap, final UUID kbTenantId) throws SQLException {
+    public void updateResponseByOmPayTxnId(final String ompayTransactionId, final String newState, final Map<String, Object> newAdditionalDataMap, final UUID kbTenantId) throws SQLException {
         try {
             final String newAdditionalData = objectMapper.writeValueAsString(newAdditionalDataMap);
             OmpayResponsesRecord existingRecord = getResponseByOmPayTransactionId(ompayTransactionId, kbTenantId);
             if (existingRecord != null) {
-                updateResponseAdditionalData(existingRecord.getRecordId(), newAdditionalData);
+                updateResponseAdditionalData(existingRecord.getRecordId(), newState, newAdditionalData);
             } else {
                 logger.warn("Attempted to update response data for non-existent OMPay transaction ID: {}", ompayTransactionId);
             }
