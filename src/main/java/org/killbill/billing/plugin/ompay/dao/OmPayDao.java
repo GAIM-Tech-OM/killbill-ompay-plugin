@@ -338,59 +338,6 @@ public class OmPayDao extends PluginPaymentDao<
         });
     }
 
-    public OmpayResponsesRecord getLatestSuccessfulTransaction(final UUID kbAccountId, final UUID kbTenantId) throws SQLException {
-        // Define what you consider successful OMPay states
-        final List<String> successfulStates = Arrays.asList("authorised", "captured");
-
-        return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
-            logger.info("DAO: Searching for latest successful transaction (ompay_processing_status in {}) for kbAccountId: {}", successfulStates, kbAccountId);
-
-            List<Condition> conditions = new ArrayList<>();
-            conditions.add(OMPAY_RESPONSES.KB_ACCOUNT_ID.eq(kbAccountId.toString()));
-            conditions.add(OMPAY_RESPONSES.KB_TENANT_ID.eq(kbTenantId.toString()));
-            conditions.add(OMPAY_RESPONSES.TRANSACTION_TYPE.in(TransactionType.PURCHASE.toString(), TransactionType.AUTHORIZE.toString()));
-            // Query directly on the new status column!
-            conditions.add(OMPAY_RESPONSES.OMPAY_STATE.lower().in(successfulStates.stream().map(String::toLowerCase).collect(Collectors.toList())));
-
-
-            OmpayResponsesRecord record = dslContext.selectFrom(OMPAY_RESPONSES)
-                    .where(conditions)
-                    .orderBy(OMPAY_RESPONSES.CREATED_DATE.desc(), OMPAY_RESPONSES.RECORD_ID.desc())
-                    .limit(1)
-                    .fetchOne();
-
-            if (record != null) {
-                logger.info("DAO: Found latest successful transaction: record_id={}, ompay_transaction_id={}, ompay_processing_status={}",
-                        record.getRecordId(), record.getOmpayTransactionId(), record.getOmpayState());
-            } else {
-                logger.warn("DAO: No successful transaction found with ompay_processing_status in {} for kbAccountId: {}", successfulStates, kbAccountId);
-            }
-            return record;
-        });
-    }
-
-    public void updateResponseData(final String ompayTransactionId, final Map<String, Object> newAdditionalDataMap, final UUID kbTenantId) throws SQLException {
-        try {
-            final String newAdditionalData = objectMapper.writeValueAsString(newAdditionalDataMap);
-            // We assume created_date doesn't change for an existing transaction when refreshing.
-            // If status or other specific fields need updating based on newAdditionalDataMap, that logic would go here.
-            // For now, just updating the whole additional_data blob.
-            execute(dataSource.getConnection(), (Connection conn) -> {
-                final DSLContext dslContext = DSL.using(conn, dialect, settings);
-                return dslContext.update(OMPAY_RESPONSES)
-                        .set(OMPAY_RESPONSES.ADDITIONAL_DATA, newAdditionalData)
-                        // Potentially update other fields if they can change and are in newAdditionalDataMap
-                        // .set(OMPAY_RESPONSES.OMPAY_STATE_COLUMN, (String) newAdditionalDataMap.get("state")) // If you had such a column
-                        .where(OMPAY_RESPONSES.OMPAY_TRANSACTION_ID.eq(ompayTransactionId))
-                        .and(OMPAY_RESPONSES.KB_TENANT_ID.eq(kbTenantId.toString()))
-                        .execute();
-            });
-        } catch (JsonProcessingException e) {
-            throw new SQLException("Failed to serialize new additional data for OMPay transaction " + ompayTransactionId, e);
-        }
-    }
-
     public void updateResponseByOmPayTxnId(final String ompayTransactionId, final String newState, final Map<String, Object> newAdditionalDataMap, final UUID kbTenantId) throws SQLException {
         try {
             final String newAdditionalData = objectMapper.writeValueAsString(newAdditionalDataMap);

@@ -1,36 +1,21 @@
-# killbill-gocardless-plugin
-![Maven Central](https://img.shields.io/maven-central/v/org.kill-bill.billing.plugin.java/gocardless-plugin?color=blue&label=Maven%20Central)
+# killbill-ompay-plugin
 
-Kill Bill payment plugin that uses [Gocardless](https://gocardless.com/) as the payment gateway.
-
-## Kill Bill compatibility
-
-| Plugin version | Kill Bill version |
-|---------------:|------------------:|
-|          1.x.y |            0.24.z |
-
-
-## Build
-
-```
-mvn clean install -DskipTests
-```
-
-## Installation
-
-```
-kpm install_java_plugin gocardless --from-source-file target/gocardless-plugin-*-SNAPSHOT.jar --destination /var/tmp/bundles
-```
-
-## Setup
-
-A GoCardless access token is required in order to use GoCardless. You can [sign up](https://manage-sandbox.gocardless.com/signup) to create a sandbox account and obtain a token from [here](https://manage-sandbox.gocardless.com/developers/access-tokens/create).
+Kill Bill payment plugin that uses [OMPay](https://docs.ompay.com/) as the payment gateway.
 
 ## Configuration
 
-Configure the plugin with the Gocardless token/environment as follows:
+Configure the plugin with your OMPay merchant details and API credentials. The available properties are:
 
-```
+* `org.killbill.billing.plugin.ompay.merchantId`: Your OMPay Merchant ID.
+* `org.killbill.billing.plugin.ompay.clientId`: Your OMPay API Client ID.
+* `org.killbill.billing.plugin.ompay.clientSecret`: Your OMPay API Client Secret.
+* `org.killbill.billing.plugin.ompay.testMode`: Set to `true` for sandbox/testing, `false` for live. Defaults to `true`.
+* `org.killbill.billing.plugin.ompay.apiBaseUrl`: (Optional) Override the default OMPay API base URL. Defaults are `https://api.sandbox.ompay.com/v1/merchants` for test mode and `https://api.ompay.com/v1/merchants` for live mode.
+* `org.killbill.billing.plugin.ompay.killbillBaseUrl`: (Optional) The base URL of your Kill Bill instance, used for constructing redirect URLs. Defaults to `http://127.0.0.1:8080`.
+
+Upload the configuration to Kill Bill for your tenant:
+
+```bash
 curl -v \
      -X POST \
      -u admin:password \
@@ -38,136 +23,166 @@ curl -v \
      -H 'X-Killbill-ApiSecret: lazar' \
      -H 'X-Killbill-CreatedBy: admin' \
      -H 'Content-Type: text/plain' \
-     -d 'org.killbill.billing.plugin.gocardless.gocardlesstoken=xxx
-	 org.killbill.billing.plugin.gocardless.environment=xxx' \
-     http://127.0.0.1:8080/1.0/kb/tenants/uploadPluginConfig/killbill-gocardless
+     -d 'org.killbill.billing.plugin.ompay.merchantId=YOUR_OMPAY_MERCHANT_ID
+org.killbill.billing.plugin.ompay.clientId=YOUR_OMPAY_CLIENT_ID
+org.killbill.billing.plugin.ompay.clientSecret=YOUR_OMPAY_CLIENT_SECRET
+org.killbill.billing.plugin.ompay.testMode=true # Optional
+# org.killbill.billing.plugin.ompay.killbillBaseUrl=http://<your_killbill_host>:8080 # Optional
+# org.killbill.billing.plugin.ompay.apiBaseUrl=[https://custom.api.ompay.com/v1/merchants](https://custom.api.ompay.com/v1/merchants) # Optional' \
+     [http://127.0.0.1:8080/1.0/kb/tenants/uploadPluginConfig/killbill-ompay](http://127.0.0.1:8080/1.0/kb/tenants/uploadPluginConfig/killbill-ompay)
 ```
 
-where:
+## Testing / Payment Flow
 
-* `gocardlesstoken`: GoCardless access token obtained above
-* `environment`: The Gocardless environment. Possible values are `SANDBOX`/`LIVE`. default value is `SANDBOX`
+This outlines the typical flow for adding a payment method using OMPay, potentially involving 3DS.
 
-## Testing
+1.  **Create a Kill Bill account for the customer:**
+    (Standard Kill Bill API - same as your Gocardless example)
+    This will return the Kill Bill `accountId`.
 
-1. Create a Kill Bill account for the customer (The following request uses the default Kill Bill API key and secret, change them if needed):
+    ```bash
+    curl -v \
+         -X POST \
+         -u admin:password \
+         -H 'X-Killbill-ApiKey: bob' \
+         -H 'X-Killbill-ApiSecret: lazar' \
+         -H 'X-Killbill-CreatedBy: tutorial' \
+         -H 'Content-Type: application/json' \
+         -d '{ "currency": "OMR" }' \
+         '[http://127.0.0.1:8080/1.0/kb/accounts](http://127.0.0.1:8080/1.0/kb/accounts)'
+    ```
+    Note the `accountId` from the `Location` header in the response.
 
-```
-curl -v \
-     -X POST \
-     -u admin:password \
-     -H 'X-Killbill-ApiKey: bob' \
-     -H 'X-Killbill-ApiSecret: lazar' \
-     -H 'X-Killbill-CreatedBy: tutorial' \
-     -H 'Content-Type: application/json' \
-     -d '{ "currency": "USD" }' \
-     'http://127.0.0.1:8080/1.0/kb/accounts'
-```
+2.  **Get Payment Form Descriptor from OMPay Plugin:**
+    Your application backend calls the plugin's `/form` endpoint to get details needed to render the OMPay payment form.
 
-This returns the Kill Bill `accountId` in the `Location` header.
-For example, in the following sample response, `17444cb7-bfa7-4f8c-a3c3-a98d31003566` is the account Id.
+    ```bash
+    curl -v \
+         -X GET \
+         -u admin:password \
+         -H "X-Killbill-ApiKey: bob" \
+         -H "X-Killbill-ApiSecret: lazar" \
+         -H 'X-Killbill-CreatedBy: tutorial' \
+         '[http://127.0.0.1:8080/plugins/killbill-ompay/form?kbAccountId=](http://127.0.0.1:8080/plugins/killbill-ompay/form?kbAccountId=)<ACCOUNT_ID>&returnUrl=[https://yourshop.com/payment/ompay_return&cancelUrl=https://yourshop.com/payment/ompay_cancel&paymentIntent=auth&currency=OMR&amount=0.100](https://yourshop.com/payment/ompay_return&cancelUrl=https://yourshop.com/payment/ompay_cancel&paymentIntent=auth&currency=OMR&amount=0.100)'
+    ```
+    * Replace `<ACCOUNT_ID>` with the customer's Kill Bill account ID.
+    * `returnUrl`: URL where OMPay redirects after successful 3DS or payment attempt.
+    * `cancelUrl`: URL where OMPay redirects if the user cancels.
+    * `paymentIntent`: `auth` for authorization, `sale` for purchase.
+    * `currency` & `amount`: Specify for the transaction (e.g., a small auth amount).
 
-```
-< Access-Control-Allow-Credentials: true
-< Location: http://127.0.0.1:8080/1.0/kb/accounts/17444cb7-bfa7-4f8c-a3c3-a98d31003566
-< Content-Type: application/json
-```
+    The response will be a JSON similar to this:
+    ```json
+    {
+        "kbAccountId": "<ACCOUNT_ID>",
+        "formMethod": "POST",
+        "formUrl": "[http://127.0.0.1:8080/plugins/killbill-ompay/process-nonce](http://127.0.0.1:8080/plugins/killbill-ompay/process-nonce)",
+        "formFields": [
+            {"key": "amount", "value": "0.100", "isHidden": false},
+            {"key": "currency", "value": "OMR", "isHidden": false}
+        ],
+        "properties": [
+            {"key": "ompayClientToken", "value": "your_ompay_client_access_token", "isHidden": false},
+            {"key": "isSandbox", "value": "true", "isHidden": false}
+        ]
+    }
+    ```
+    Key fields:
+    * `formUrl`: The endpoint where the payment nonce will be submitted.
+    * `properties.ompayClientToken`: The client token from OMPay to initialize their SDK/form.
 
-2. Use the plugin `/checkout` API to create a redirect flow:
+3.  **Render OMPay Form and Submit Nonce:**
+    * On your frontend, use the `ompayClientToken` to initialize the OMPay payment form (e.g., using OMPay's JavaScript SDK).
+    * When the user submits their card details, the OMPay SDK will provide a payment `nonce`.
+    * Your application backend then POSTs this `nonce` and other details to the `formUrl` obtained in Step 2 (which is `/plugins/killbill-ompay/process-nonce`).
 
-```
-curl -v \
-     -X POST \
-     -u admin:password \
-     -H "X-Killbill-ApiKey: bob" \
-     -H "X-Killbill-ApiSecret: lazar" \
-     -H 'X-Killbill-CreatedBy: tutorial' \
-     -H "Content-Type: application/json" \
-     'http://127.0.0.1:8080/plugins/killbill-gocardless/checkout?kbAccountId=<ACCOUNT_ID>'
-```
+    ```bash
+    curl -v \
+         -X POST \
+         -u admin:password \
+         -H "X-Killbill-ApiKey: bob" \
+         -H "X-Killbill-ApiSecret: lazar" \
+         -H 'X-Killbill-CreatedBy: tutorial' \
+         -H "Content-Type: application/x-www-form-urlencoded" \
+         -d "nonce=<GENERATED_OMPAY_NONCE>&kbAccountId=<ACCOUNT_ID>&amount=0.100&currency=OMR&paymentIntent=auth&returnUrl=[https://yourshop.com/payment/ompay_return&cancelUrl=https://yourshop.com/payment/ompay_cancel&force3ds=false](https://yourshop.com/payment/ompay_return&cancelUrl=https://yourshop.com/payment/ompay_cancel&force3ds=false)" \
+         '[http://127.0.0.1:8080/plugins/killbill-ompay/process-nonce](http://127.0.0.1:8080/plugins/killbill-ompay/process-nonce)'
+    ```
+    The response from `/process-nonce` will be JSON. Example:
+    ```json
+    {
+        "success": true,
+        "kb_payment_id": "...",
+        "kb_transaction_id": "...",
+        "transaction_type": "AUTHORIZE",
+        "status": "PENDING", // or PROCESSED, ERROR
+        "ompay_transaction_id": "ompay_txn_...",
+        "requires_3ds": true, // if true, a redirect_url will be present
+        "redirect_url": "https://ompay_3ds_url/..." // if requires_3ds is true
+    }
+    ```
 
-This returns a response similar to the following:
+4.  **Handle 3DS Redirect (if applicable):**
+    * If the response from Step 3 indicates `requires_3ds: true` and provides a `redirect_url`, your application must redirect the user's browser to this OMPay URL.
+    * After the user completes the 3DS authentication, OMPay will redirect them back to the `returnUrl` you initially provided. This callback to your `returnUrl` should include a `sessionId` from OMPay (e.g., as a query parameter `?sessionId=ompay_session_xyz`).
 
-```
-{
-  "formFields": [],
-  "formMethod": "GET",
-  "formUrl": "https://pay-sandbox.gocardless.com/billing/static/flow?id=BRF000103WH5G2459BAT7ET0Q0TMTG3Z",
-  "kbAccountId": "5b4fc584-8af9-4d52-80ed-b46361cf1dc3",
-  "properties": []
-}
-```
+5.  **Add Payment Method to Kill Bill (Complete 3DS Flow or if no 3DS):**
+    * **If 3DS occurred:** Extract the `sessionId` from the OMPay redirect (Step 4).
+    * Call Kill Bill's standard endpoint to add a payment method. Pass the `sessionId` as a plugin property. This tells the OMPay plugin to finalize the payment method addition using the session data from OMPay.
 
-Copy the `formUrl` from the response and save it for further use.
+        ```bash
+        curl -v \
+             -X POST \
+             -u admin:password \
+             -H 'X-Killbill-ApiKey: bob' \
+             -H 'X-Killbill-ApiSecret: lazar' \
+             -H 'X-Killbill-CreatedBy: tutorial' \
+             -H 'Content-Type: application/json' \
+             -d '{
+               "pluginName": "killbill-ompay",
+               "pluginInfo": {
+                 "properties": [
+                   {
+                     "key": "sessionId",
+                     "value": "<SESSION_ID_FROM_OMPAY_REDIRECT>"
+                   }
+                   // You might also include other properties if needed by your frontend/backend logic
+                 ]
+               }
+             }' \
+             '[http://127.0.0.1:8080/1.0/kb/accounts/](http://127.0.0.1:8080/1.0/kb/accounts/)<ACCOUNT_ID>/paymentMethods?isDefault=true'
+        ```
+    * **If no 3DS was required (Step 3 resulted in `status: "PROCESSED"` and `requires_3ds: false`):** The payment method might have been added automatically during the `/process-nonce` call if the transaction was successful and yielded a card token. You can verify by listing payment methods for the account. If it wasn't automatically added, or if you prefer explicit control, you could potentially call the same endpoint as above but without the `sessionId` and instead providing OMPay card/payer tokens if available and if the plugin supports direct token-based PM creation (check `OmPayPaymentPluginApi#addPaymentMethodDirect` logic). However, the primary flow described involves the nonce and optional session.
 
-3. Redirect the user to the `formUrl` and have them fill the form with their bank account details to set up a mandate. For testing you can enter the `formUrl` in a browser and enter the following bank account details (See [setting up a mandate](https://developer.gocardless.com/direct-debit/setting-up-a-mandate)):
-  * Bank code: 026073150
-  * Account number: 2715500356
-  * Account type: checking
-  
-This redirects the user to a success page with the `redirect_flow_id` in the URL. Copy this `redirect_flow_id` and save it for further use.
+    This call (with `sessionId`) returns the Kill Bill `paymentMethodId` in the `Location` header.
 
-4. Finally, complete the redirect flow using the `redirect_flow_id` obtained above:
+6.  **Trigger Payments against the new Payment Method:**
+    (Standard Kill Bill API - same as your Gocardless example, using the `paymentMethodId` from Step 5)
 
-```
-curl -v \
-     -X POST \
-     -u admin:password \
-     -H 'X-Killbill-ApiKey: bob' \
-     -H 'X-Killbill-ApiSecret: lazar' \
-     -H 'X-Killbill-CreatedBy: tutorial' \
-     -H 'Content-Type: application/json' \
-     -d '{
-       "pluginName": "killbill-gocardless",
-       "pluginInfo": {
-         "properties": [
-           {
-             "key": "redirect_flow_id",
-             "value": "<redirect_flow_id>"
-           },
-           {
-             "key": "session_token",
-             "value": "killbill_token"
-           }
-         ]
-       }
-     }' \
-     'http://127.0.0.1:8080/1.0/kb/accounts/<ACCOUNT_ID>/paymentMethods?isDefault=true'
-```
+    ```bash
+    curl -v \
+         -X POST \
+         -u admin:password \
+         -H "X-Killbill-ApiKey: bob" \
+         -H "X-Killbill-ApiSecret: lazar" \
+         -H "X-Killbill-CreatedBy: tutorial" \
+         -H "Content-Type: application/json" \
+         --data-binary '{"transactionType":"PURCHASE","amount":"10.000", "currency": "OMR", "paymentMethodId": "<PAYMENT_METHOD_ID>"}' \
+         '[http://127.0.0.1:8080/1.0/kb/accounts/](http://127.0.0.1:8080/1.0/kb/accounts/)<ACCOUNT_ID>/payments'
+    ```
+    Note the `paymentId` from the `Location` header.
 
-This adds the the mandate as a payment method in Kill Bill and returns the `paymentMethodId` in the Location header.
+7.  **Obtain Information about the Payment:**
+    (Standard Kill Bill API - same as your Gocardless example)
 
-5. You can then trigger payments against that payment method:
+    ```bash
+    curl -v \
+         -u admin:password \
+         -H "X-Killbill-ApiKey: bob" \
+         -H "X-Killbill-ApiSecret: lazar" \
+         '[http://127.0.0.1:8080/1.0/kb/payments/](http://127.0.0.1:8080/1.0/kb/payments/)<PAYMENT_ID>?withPluginInfo=true'
+    ```
 
-```
-curl -v \
-     -X POST \
-     -u admin:password \
-     -H "X-Killbill-ApiKey: bob" \
-     -H "X-Killbill-ApiSecret: lazar" \
-     -H "X-Killbill-CreatedBy: tutorial" \
-     -H "Content-Type: application/json" \
-     --data-binary '{"transactionType":"PURCHASE","amount":"10"}' \
-    'http://127.0.0.1:8080/1.0/kb/accounts/<ACCOUNT_ID>/payments'
-```
-This returns the `paymentId` in the `Location` header.
+8.  **Webhook Handling:**
+    Configure OMPay to send webhooks to `/plugins/killbill-ompay/webhook`. The plugin will process these notifications to update transaction statuses in Kill Bill.
 
-6. You can then obtain information about the payment as follows:
-
-```
-curl -v \
-     -u admin:password \
-     -H "X-Killbill-ApiKey: bob" \
-     -H "X-Killbill-ApiSecret: lazar" \
-    'http://127.0.0.1:8080/1.0/kb/payments/<PAYMENT_ID>?withPluginInfo=true'
-```
-
-7. If you do not want the plugin to be called, you can specify `withPluginInfo=false` as follows:
-
-```
-curl -v \
-     -u admin:password \
-     -H "X-Killbill-ApiKey: bob" \
-     -H "X-Killbill-ApiSecret: lazar" \
-    'http://127.0.0.1:8080/1.0/kb/payments/<PAYMENT_ID>?withPluginInfo=false'
-```
+This flow should align with how your `OmPayPaymentPluginApi.java`, `OmPayFormServlet.java`, and `OmPayNonceHandlerServlet.java` are structured and how your C# `BillingService` interacts with them.
