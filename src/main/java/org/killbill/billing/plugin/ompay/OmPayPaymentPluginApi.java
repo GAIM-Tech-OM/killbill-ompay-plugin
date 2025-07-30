@@ -577,7 +577,7 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
 
         // Payer info (minimal for subsequent transactions)
         final Map<String, Object> payerInfo = new HashMap<>();
-        payerInfo.put("email", kbAccount.getEmail());
+        payerInfo.put("email", kbAccount.getId().toString() + "@orki.ai");
 
         // Include billing address for subsequent transactions
         final Map<String, Object> billingAddress = buildBillingAddress(kbAccount);
@@ -613,7 +613,7 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
      */
     private Map<String, Object> buildPayerInfo(final Account kbAccount) {
         final Map<String, Object> payerInfo = new HashMap<>();
-        payerInfo.put("email", kbAccount.getEmail());
+        payerInfo.put("email", kbAccount.getId().toString() + "@orki.ai");
         payerInfo.put("name", kbAccount.getName());
 
         final Map<String, Object> billingAddress = buildBillingAddress(kbAccount);
