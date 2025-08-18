@@ -330,35 +330,8 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
                     config.getBasicAuthHeader(),
                     "application/json");
 
-            // Parse response
-            final Map<String, Object> omPayResponseMap = omPayResponse.getResponseMap();
-            if (omPayResponseMap == null) {
-                logger.error("OMPay response could not be parsed. Status: {}, Body: {}",
-                        omPayResponse.getStatusCode(), omPayResponse.getResponseBody());
-                throw new PaymentPluginApiException("OMPay API Error", "Invalid response from OMPay gateway.");
-            }
-
-            logger.info("OMPay /payment response for {}: {}", transactionType, omPayResponse.getResponseBody());
-
-            // Extract response data
-            final PaymentResponseData responseData = extractPaymentResponseData(omPayResponseMap);
-            final PaymentPluginStatus pluginStatus = mapOmpayStatusToKillBill(responseData.state);
-
-            // Store transaction in database
-            dao.addResponse(kbAccountId, kbPaymentId, kbTransactionId, transactionType, amount, currency,
-                    responseData.transactionId, responseData.referenceId, responseData.payerId,
-                    responseData.cardId, responseData.state, responseData.redirectUrl, responseData.authenticateUrl,
-                    omPayResponseMap, utcNow, context.getTenantId());
-
-            // If transaction is successful (not pending), add payment method
-            if (pluginStatus == PaymentPluginStatus.PROCESSED && !Strings.isNullOrEmpty(responseData.cardId)) {
-                addPaymentMethodFromSuccessfulTransaction(kbAccountId, responseData, omPayResponseMap, context);
-            }
-
-            // Build and return transaction info
-            return buildPaymentTransactionInfoPlugin(kbPaymentId, kbTransactionId, transactionType,
-                    amount, currency, pluginStatus, responseData,
-                    utcNow, properties);
+            return processOmPayResponse(omPayResponse, transactionType, kbAccountId, kbPaymentId,
+                    kbTransactionId, amount, currency, utcNow, properties, context);
 
         } catch (PaymentPluginApiException e) {
             throw e;
@@ -455,30 +428,8 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
                     config.getBasicAuthHeader(),
                     "application/json");
 
-            // Parse and process response (same as initial transaction)
-            final Map<String, Object> omPayResponseMap = omPayResponse.getResponseMap();
-            if (omPayResponseMap == null) {
-                logger.error("OMPay response could not be parsed. Status: {}, Body: {}",
-                        omPayResponse.getStatusCode(), omPayResponse.getResponseBody());
-                throw new PaymentPluginApiException("OMPay API Error", "Invalid response from OMPay gateway.");
-            }
-
-            logger.info("OMPay subsequent payment response: {}", omPayResponse.getResponseBody());
-
-            // Extract response data
-            final PaymentResponseData responseData = extractPaymentResponseData(omPayResponseMap);
-            final PaymentPluginStatus pluginStatus = mapOmpayStatusToKillBill(responseData.state);
-
-            // Store transaction in database
-            dao.addResponse(kbAccountId, kbPaymentId, kbTransactionId, transactionType, amount, currency,
-                    responseData.transactionId, responseData.referenceId, responseData.payerId,
-                    responseData.cardId, responseData.state, responseData.redirectUrl, responseData.authenticateUrl,
-                    omPayResponseMap, utcNow, context.getTenantId());
-
-            // Build and return transaction info
-            return buildPaymentTransactionInfoPlugin(kbPaymentId, kbTransactionId, transactionType,
-                    amount, currency, pluginStatus, responseData,
-                    utcNow, properties);
+            return processOmPayResponse(omPayResponse, transactionType, kbAccountId, kbPaymentId,
+                    kbTransactionId, amount, currency, utcNow, properties, context);
 
         } catch (PaymentPluginApiException e) {
             throw e;
@@ -1654,109 +1605,6 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
     }
 
     @Override
-    public List<PaymentTransactionInfoPlugin> getPaymentInfo(final UUID kbAccountId, final UUID kbPaymentId, final Iterable<PluginProperty> properties, final TenantContext context) throws PaymentPluginApiException {
-        logger.info("getPaymentInfo called for kbAccountId: {}, kbPaymentId: {}", kbAccountId, kbPaymentId);
-
-        List<PaymentTransactionInfoPlugin> transactionsFromDb;
-        try {
-            transactionsFromDb = dao.getPaymentInfosForKbPaymentId(kbPaymentId, context.getTenantId());
-        } catch (SQLException e) {
-            logger.error("DAO Error fetching initial payment info for kbPaymentId {}: {}", kbPaymentId, e.getMessage(), e);
-            throw new PaymentPluginApiException("DAO Error", "Could not retrieve payment info: " + e.getMessage());
-        }
-
-        if (transactionsFromDb.isEmpty()) {
-            return transactionsFromDb;
-        }
-
-        boolean wasRefreshed = false;
-        final OmPayConfigProperties config = configurationHandler.getConfigurable(context.getTenantId());
-        Account account = null; // To be fetched if needed for notifications
-
-        for (PaymentTransactionInfoPlugin transaction : transactionsFromDb) {
-            if (transaction.getStatus() == PaymentPluginStatus.PENDING) {
-                final String ompayTransactionIdToRefresh = transaction.getFirstPaymentReferenceId();
-
-                if (Strings.isNullOrEmpty(ompayTransactionIdToRefresh)) {
-                    logger.warn("Cannot refresh PENDING transaction kbTransactionId {} (OMPay ID is missing/null).", transaction.getKbTransactionPaymentId());
-                    continue;
-                }
-
-                logger.info("Refreshing PENDING transaction: kbTransactionId={}, ompayTransactionId={}", transaction.getKbTransactionPaymentId(), ompayTransactionIdToRefresh);
-                String retrieveUrl = config.getApiBaseUrlWithMerchant() + "/payment/" + ompayTransactionIdToRefresh;
-
-                try {
-                    OmPayHttpClient.OmPayHttpResponse response = httpClient.doGet(retrieveUrl, config.getBasicAuthHeader());
-                    Map<String, Object> gatewayResponseMap = response.getResponseMap();
-
-                    if (response.isSuccess() && gatewayResponseMap != null) {
-                        String newStateFromGateway = (String) gatewayResponseMap.get("state");
-                        PaymentPluginStatus newPluginStatus = mapOmpayStatusToKillBill(newStateFromGateway);
-
-                        logger.info("Refreshed OMPay transaction ID {}: oldStatus={}, newGatewayState={}, newPluginStatus={}",
-                                ompayTransactionIdToRefresh, transaction.getStatus(), newStateFromGateway, newPluginStatus);
-
-                        // Update the local database record
-                        dao.updateResponseByOmPayTxnId(ompayTransactionIdToRefresh, newStateFromGateway, gatewayResponseMap, context.getTenantId());
-                        wasRefreshed = true;
-
-                        // If status changed from PENDING to a terminal state, notify Kill Bill
-                        if (transaction.getStatus() == PaymentPluginStatus.PENDING && newPluginStatus != PaymentPluginStatus.PENDING) {
-                            OmpayResponsesRecord updatedRecord = dao.getResponseByOmPayTransactionId(ompayTransactionIdToRefresh, context.getTenantId());
-                            if (updatedRecord != null) {
-                                if (account == null) { // Fetch account only once if needed
-                                    account = killbillAPI.getAccountUserApi().getAccountById(kbAccountId, context);
-                                }
-                                final CallContext callContextForNotification = new PluginCallContext(OmPayActivator.PLUGIN_NAME, clock.getClock().getUTCNow(), kbAccountId, context.getTenantId());
-
-                                logger.info("Notifying Kill Bill of status change for kbTransactionId {} (OMPay ID {}) from PENDING to {}. isSuccess: {}",
-                                        updatedRecord.getKbPaymentTransactionId(), ompayTransactionIdToRefresh, newPluginStatus, (newPluginStatus == PaymentPluginStatus.PROCESSED));
-
-                                killbillAPI.getPaymentApi().notifyPendingTransactionOfStateChanged(
-                                        account,
-                                        UUID.fromString(updatedRecord.getKbPaymentTransactionId()),
-                                        (newPluginStatus == PaymentPluginStatus.PROCESSED),
-                                        callContextForNotification
-                                );
-                            } else {
-                                logger.error("Failed to re-fetch updated record for OMPay ID {} after refresh, cannot notify Kill Bill.", ompayTransactionIdToRefresh);
-                            }
-                        }
-                    } else {
-                        logger.warn("Failed to refresh payment info for OMPay ID {} from gateway. Status: {}, Body: {}",
-                                ompayTransactionIdToRefresh, response.getStatusCode(), response.getResponseBody());
-                    }
-                } catch (AccountApiException e) {
-                    logger.error("Account API error while preparing for notification for OMPay ID {}: {}", ompayTransactionIdToRefresh, e.getMessage(), e);
-                    // Potentially rethrow or handle if critical, for now, just log and continue
-                } catch (org.killbill.billing.payment.api.PaymentApiException e) {
-                    logger.error("Payment API error during Kill Bill notification for OMPay ID {}: {}", ompayTransactionIdToRefresh, e.getMessage(), e);
-                    // Potentially rethrow or handle
-                } catch (SQLException e) {
-                    logger.error("DAO error during refresh or notification prep for OMPay ID {}: {}", ompayTransactionIdToRefresh, e.getMessage(), e);
-                    // Don't let a single failed refresh stop others, but log it.
-                } catch (Exception e) {
-                    logger.error("Unexpected error during gateway refresh for OMPay ID {}: {}", ompayTransactionIdToRefresh, e.getMessage(), e);
-                    // Don't let a single failed refresh stop others, but log it.
-                }
-            }
-        }
-
-        if (wasRefreshed) {
-            try {
-                // Re-fetch from DB to get all updates
-                logger.info("Re-fetching payment info from DB after refresh for kbPaymentId: {}", kbPaymentId);
-                return dao.getPaymentInfosForKbPaymentId(kbPaymentId, context.getTenantId());
-            } catch (SQLException e) {
-                logger.error("DAO Error fetching payment info after refresh for kbPaymentId {}: {}", kbPaymentId, e.getMessage(), e);
-                throw new PaymentPluginApiException("DAO Error", "Could not retrieve payment info after refresh: " + e.getMessage());
-            }
-        } else {
-            return transactionsFromDb;
-        }
-    }
-
-    @Override
     public void deletePaymentMethod(UUID kbAccountId, UUID kbPaymentMethodId, Iterable<PluginProperty> properties, CallContext context) throws PaymentPluginApiException {
         logger.info("Attempting to delete payment method with kbPaymentMethodId: {}", kbPaymentMethodId);
         final OmPayConfigProperties config = configurationHandler.getConfigurable(context.getTenantId());
@@ -1942,5 +1790,315 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
     public void resetPaymentMethods(UUID kbAccountId, List<PaymentMethodInfoPlugin> paymentMethods, Iterable<PluginProperty> properties, CallContext context) throws PaymentPluginApiException {
         logger.warn("resetPaymentMethods is not supported by this OMPay plugin. This operation could lead to data inconsistencies if not carefully managed with OMPay's Payer-centric model.");
         throw new PaymentPluginApiException("Unsupported Operation", "resetPaymentMethods is not supported.");
+    }
+
+    private PaymentTransactionInfoPlugin processOmPayResponse(final OmPayHttpClient.OmPayHttpResponse omPayResponse,
+                                                              final TransactionType transactionType,
+                                                              final UUID kbAccountId,
+                                                              final UUID kbPaymentId,
+                                                              final UUID kbTransactionId,
+                                                              final BigDecimal amount,
+                                                              final Currency currency,
+                                                              final DateTime utcNow,
+                                                              final Iterable<PluginProperty> properties,
+                                                              final CallContext context) throws PaymentPluginApiException {
+
+        Map<String, Object> omPayResponseMap = omPayResponse.getResponseMap();
+        PaymentPluginStatus pluginStatus;
+        PaymentResponseData responseData = new PaymentResponseData();
+
+        if (!omPayResponse.isSuccess()) {
+            // HTTP error - treat as failed payment
+            logger.error("OMPay API returned HTTP error: Status={}, Body={}",
+                    omPayResponse.getStatusCode(), omPayResponse.getResponseBody());
+
+            pluginStatus = PaymentPluginStatus.ERROR;
+            responseData.state = "failed";
+            responseData.resultCode = String.valueOf(omPayResponse.getStatusCode());
+            responseData.resultDescription = "HTTP Error: " + omPayResponse.getStatusCode();
+
+            // Create error response map
+            omPayResponseMap = new HashMap<>();
+            omPayResponseMap.put("state", "failed");
+            omPayResponseMap.put("error", "HTTP Error: " + omPayResponse.getStatusCode());
+            omPayResponseMap.put("error_body", omPayResponse.getResponseBody());
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("code", String.valueOf(omPayResponse.getStatusCode()));
+            result.put("description", "HTTP Error: " + omPayResponse.getStatusCode());
+            omPayResponseMap.put("result", result);
+
+        } else if (omPayResponseMap == null) {
+            // Success HTTP but unparseable response
+            logger.error("OMPay response could not be parsed. Status: {}, Body: {}",
+                    omPayResponse.getStatusCode(), omPayResponse.getResponseBody());
+
+            pluginStatus = PaymentPluginStatus.ERROR;
+            responseData.state = "failed";
+            responseData.resultCode = "PARSE_ERROR";
+            responseData.resultDescription = "Invalid response format from OMPay gateway";
+
+            omPayResponseMap = new HashMap<>();
+            omPayResponseMap.put("state", "failed");
+            omPayResponseMap.put("error", "Invalid response format");
+            omPayResponseMap.put("original_body", omPayResponse.getResponseBody());
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("code", "PARSE_ERROR");
+            result.put("description", "Invalid response format from OMPay gateway");
+            omPayResponseMap.put("result", result);
+
+        } else {
+            // Valid OMPay response - extract data
+            responseData = extractPaymentResponseData(omPayResponseMap);
+            pluginStatus = mapOmpayStatusToKillBill(responseData.state);
+
+            // Check for OMPay-level errors even with HTTP 200
+            Map<String, Object> result = (Map<String, Object>) omPayResponseMap.get("result");
+            if (result != null) {
+                String resultCode = (String) result.get("code");
+                // OMPay uses "0000" for success, anything else is typically an error
+                if (!"0000".equals(resultCode) && pluginStatus != PaymentPluginStatus.PENDING) {
+                    logger.warn("OMPay returned error code: {} with description: {}",
+                            resultCode, result.get("description"));
+                    // Override status if we got an error code but state wasn't already indicating failure
+                    if (pluginStatus == PaymentPluginStatus.PROCESSED) {
+                        pluginStatus = PaymentPluginStatus.ERROR;
+                        responseData.state = "declined";
+                    }
+                }
+            }
+        }
+
+        try {
+            // Store transaction in database FIRST
+            dao.addResponse(kbAccountId, kbPaymentId, kbTransactionId, transactionType, amount, currency,
+                    responseData.transactionId, responseData.referenceId, responseData.payerId,
+                    responseData.cardId, responseData.state, responseData.redirectUrl,
+                    responseData.authenticateUrl, omPayResponseMap, utcNow, context.getTenantId());
+
+            // CRITICAL: Notify Kill Bill immediately of the final status
+            if (pluginStatus != PaymentPluginStatus.PENDING && pluginStatus != PaymentPluginStatus.UNDEFINED) {
+                notifyKillBillOfTransactionState(kbAccountId, kbTransactionId, pluginStatus, context);
+            }
+
+            // If transaction is successful (not pending), add payment method for initial transactions
+            if (pluginStatus == PaymentPluginStatus.PROCESSED && !Strings.isNullOrEmpty(responseData.cardId)) {
+                addPaymentMethodFromSuccessfulTransaction(kbAccountId, responseData, omPayResponseMap, context);
+            }
+
+            // Build and return transaction info
+            return buildPaymentTransactionInfoPlugin(kbPaymentId, kbTransactionId, transactionType,
+                    amount, currency, pluginStatus, responseData, utcNow, properties);
+
+        } catch (Exception e) {
+            logger.error("Error storing payment response: {}", e.getMessage(), e);
+            throw new PaymentPluginApiException("Database Error", "Failed to store payment response: " + e.getMessage());
+        }
+    }
+
+    // NEW METHOD: Centralized Kill Bill notification
+    private void notifyKillBillOfTransactionState(final UUID kbAccountId,
+                                                  final UUID kbTransactionId,
+                                                  final PaymentPluginStatus status,
+                                                  final CallContext context) {
+        try {
+            final Account account = killbillAPI.getAccountUserApi().getAccountById(kbAccountId, context);
+            final boolean isSuccess = (status == PaymentPluginStatus.PROCESSED);
+
+            logger.info("Notifying Kill Bill of transaction state change: kbTransactionId={}, status={}, isSuccess={}",
+                    kbTransactionId, status, isSuccess);
+
+            killbillAPI.getPaymentApi().notifyPendingTransactionOfStateChanged(
+                    account,
+                    kbTransactionId,
+                    isSuccess,
+                    context
+            );
+
+            logger.info("Successfully notified Kill Bill of status change for transaction {}: {} (success={})",
+                    kbTransactionId, status, isSuccess);
+
+        } catch (Exception e) {
+            logger.error("Failed to notify Kill Bill of status change for transaction {}: {}",
+                    kbTransactionId, e.getMessage(), e);
+            // Don't throw - this shouldn't fail the payment processing
+        }
+    }
+
+    @Override
+    public List<PaymentTransactionInfoPlugin> getPaymentInfo(final UUID kbAccountId,
+                                                             final UUID kbPaymentId,
+                                                             final Iterable<PluginProperty> properties,
+                                                             final TenantContext context) throws PaymentPluginApiException {
+        logger.info("getPaymentInfo called for kbAccountId: {}, kbPaymentId: {}", kbAccountId, kbPaymentId);
+
+        List<PaymentTransactionInfoPlugin> transactionsFromDb;
+        try {
+            transactionsFromDb = dao.getPaymentInfosForKbPaymentId(kbPaymentId, context.getTenantId());
+        } catch (SQLException e) {
+            logger.error("DAO Error fetching initial payment info for kbPaymentId {}: {}", kbPaymentId, e.getMessage(), e);
+            throw new PaymentPluginApiException("DAO Error", "Could not retrieve payment info: " + e.getMessage());
+        }
+
+        if (transactionsFromDb.isEmpty()) {
+            return transactionsFromDb;
+        }
+
+        boolean wasRefreshed = false;
+        final OmPayConfigProperties config = configurationHandler.getConfigurable(context.getTenantId());
+        Account account = null;
+
+        for (PaymentTransactionInfoPlugin transaction : transactionsFromDb) {
+            // Refresh PENDING transactions OR transactions that are still UNDEFINED/UNKNOWN
+            if (transaction.getStatus() == PaymentPluginStatus.PENDING ||
+                    transaction.getStatus() == PaymentPluginStatus.UNDEFINED) {
+
+                final String ompayTransactionIdToRefresh = transaction.getFirstPaymentReferenceId();
+
+                if (Strings.isNullOrEmpty(ompayTransactionIdToRefresh)) {
+                    logger.warn("Cannot refresh transaction kbTransactionId {} (OMPay ID is missing/null). Status: {}",
+                            transaction.getKbTransactionPaymentId(), transaction.getStatus());
+
+                    // For UNDEFINED status with no OMPay ID, treat as failed
+                    if (transaction.getStatus() == PaymentPluginStatus.UNDEFINED) {
+                        logger.info("Marking UNDEFINED transaction {} as ERROR due to missing OMPay ID",
+                                transaction.getKbTransactionPaymentId());
+
+                        try {
+                            // Update the transaction as failed
+                            Map<String, Object> errorData = new HashMap<>();
+                            errorData.put("state", "failed");
+                            errorData.put("error", "Missing OMPay transaction ID");
+                            errorData.put("marked_failed_by_janitor", true);
+
+                            dao.updateResponseByOmPayTxnId("unknown", "failed", errorData, context.getTenantId());
+
+                            // Notify Kill Bill
+                            if (account == null) {
+                                account = killbillAPI.getAccountUserApi().getAccountById(kbAccountId, context);
+                            }
+                            final CallContext callContext = new PluginCallContext(OmPayActivator.PLUGIN_NAME,
+                                    clock.getClock().getUTCNow(),
+                                    kbAccountId,
+                                    context.getTenantId());
+
+                            killbillAPI.getPaymentApi().notifyPendingTransactionOfStateChanged(
+                                    account,
+                                    transaction.getKbTransactionPaymentId(),
+                                    false, // isSuccess = false
+                                    callContext
+                            );
+
+                            logger.info("Notified Kill Bill of UNDEFINED->ERROR transition for transaction {}",
+                                    transaction.getKbTransactionPaymentId());
+                            wasRefreshed = true;
+
+                        } catch (Exception e) {
+                            logger.error("Failed to mark UNDEFINED transaction as failed: {}", e.getMessage(), e);
+                        }
+                    }
+                    continue;
+                }
+
+                logger.info("Refreshing transaction: kbTransactionId={}, ompayTransactionId={}, currentStatus={}",
+                        transaction.getKbTransactionPaymentId(), ompayTransactionIdToRefresh, transaction.getStatus());
+
+                String retrieveUrl = config.getApiBaseUrlWithMerchant() + "/payment/" + ompayTransactionIdToRefresh;
+
+                try {
+                    OmPayHttpClient.OmPayHttpResponse response = httpClient.doGet(retrieveUrl, config.getBasicAuthHeader());
+                    Map<String, Object> gatewayResponseMap = response.getResponseMap();
+
+                    if (response.isSuccess() && gatewayResponseMap != null) {
+                        String newStateFromGateway = (String) gatewayResponseMap.get("state");
+                        PaymentPluginStatus newPluginStatus = mapOmpayStatusToKillBill(newStateFromGateway);
+
+                        logger.info("Refreshed OMPay transaction ID {}: oldStatus={}, newGatewayState={}, newPluginStatus={}",
+                                ompayTransactionIdToRefresh, transaction.getStatus(), newStateFromGateway, newPluginStatus);
+
+                        // Update the local database record
+                        dao.updateResponseByOmPayTxnId(ompayTransactionIdToRefresh, newStateFromGateway, gatewayResponseMap, context.getTenantId());
+                        wasRefreshed = true;
+
+                        // CRITICAL: Notify Kill Bill if status changed to a terminal state
+                        if ((transaction.getStatus() == PaymentPluginStatus.PENDING || transaction.getStatus() == PaymentPluginStatus.UNDEFINED) &&
+                                newPluginStatus != PaymentPluginStatus.PENDING && newPluginStatus != PaymentPluginStatus.UNDEFINED) {
+
+                            if (account == null) {
+                                account = killbillAPI.getAccountUserApi().getAccountById(kbAccountId, context);
+                            }
+                            final CallContext callContextForNotification = new PluginCallContext(OmPayActivator.PLUGIN_NAME,
+                                    clock.getClock().getUTCNow(),
+                                    kbAccountId,
+                                    context.getTenantId());
+
+                            logger.info("Notifying Kill Bill of status change for kbTransactionId {} (OMPay ID {}) from {} to {}. isSuccess: {}",
+                                    transaction.getKbTransactionPaymentId(), ompayTransactionIdToRefresh,
+                                    transaction.getStatus(), newPluginStatus, (newPluginStatus == PaymentPluginStatus.PROCESSED));
+
+                            killbillAPI.getPaymentApi().notifyPendingTransactionOfStateChanged(
+                                    account,
+                                    transaction.getKbTransactionPaymentId(),
+                                    (newPluginStatus == PaymentPluginStatus.PROCESSED),
+                                    callContextForNotification
+                            );
+
+                            logger.info("Successfully notified Kill Bill of status change for transaction {}",
+                                    transaction.getKbTransactionPaymentId());
+                        }
+                    } else {
+                        logger.warn("Failed to refresh payment info for OMPay ID {} from gateway. Status: {}, Body: {}",
+                                ompayTransactionIdToRefresh, response.getStatusCode(), response.getResponseBody());
+
+                        // If we can't reach the gateway, and transaction is UNDEFINED, mark as ERROR
+                        if (transaction.getStatus() == PaymentPluginStatus.UNDEFINED && response.getStatusCode() >= 400) {
+                            logger.info("Marking unreachable UNDEFINED transaction {} as ERROR", transaction.getKbTransactionPaymentId());
+
+                            try {
+                                Map<String, Object> errorData = new HashMap<>();
+                                errorData.put("state", "failed");
+                                errorData.put("error", "Gateway unreachable: HTTP " + response.getStatusCode());
+                                errorData.put("marked_failed_by_janitor", true);
+
+                                dao.updateResponseByOmPayTxnId(ompayTransactionIdToRefresh, "failed", errorData, context.getTenantId());
+
+                                if (account == null) {
+                                    account = killbillAPI.getAccountUserApi().getAccountById(kbAccountId, context);
+                                }
+                                final CallContext callContext = new PluginCallContext(OmPayActivator.PLUGIN_NAME,
+                                        clock.getClock().getUTCNow(),
+                                        kbAccountId,
+                                        context.getTenantId());
+
+                                killbillAPI.getPaymentApi().notifyPendingTransactionOfStateChanged(
+                                        account, transaction.getKbTransactionPaymentId(), false, callContext);
+
+                                logger.info("Notified Kill Bill of UNDEFINED->ERROR transition for unreachable transaction {}",
+                                        transaction.getKbTransactionPaymentId());
+                                wasRefreshed = true;
+
+                            } catch (Exception e) {
+                                logger.error("Failed to mark unreachable transaction as failed: {}", e.getMessage(), e);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.error("Unexpected error during gateway refresh for OMPay ID {}: {}", ompayTransactionIdToRefresh, e.getMessage(), e);
+                }
+            }
+        }
+
+        if (wasRefreshed) {
+            try {
+                logger.info("Re-fetching payment info from DB after refresh for kbPaymentId: {}", kbPaymentId);
+                return dao.getPaymentInfosForKbPaymentId(kbPaymentId, context.getTenantId());
+            } catch (SQLException e) {
+                logger.error("DAO Error fetching payment info after refresh for kbPaymentId {}: {}", kbPaymentId, e.getMessage(), e);
+                throw new PaymentPluginApiException("DAO Error", "Could not retrieve payment info after refresh: " + e.getMessage());
+            }
+        } else {
+            return transactionsFromDb;
+        }
     }
 }
