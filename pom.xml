@@ -28,7 +28,16 @@
     <packaging>bundle</packaging>
     <name>Kill Bill Ompay plugin</name>
     <description>Kill Bill Ompay plugin</description>
-    <url>http://github.com/killbill/killbill-ompay-plugin</url>
+    <url>https://github.com/GAIM-TECH-OM/killbill-ompay-plugin</url>
+
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/GAIM-TECH-OM/killbill-ompay-plugin</url>
+        </repository>
+    </distributionManagement>
+
     <properties>
         <check.fail-spotbugs>true</check.fail-spotbugs>
         <check.spotbugs-exclude-filter-file>spotbugs-exclude.xml</check.spotbugs-exclude-filter-file>
