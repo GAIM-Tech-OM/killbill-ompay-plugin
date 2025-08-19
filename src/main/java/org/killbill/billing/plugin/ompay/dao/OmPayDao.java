@@ -23,6 +23,8 @@ import com.google.common.base.Strings;
 import org.joda.time.DateTime;
 import org.jooq.Condition;
 import org.jooq.DSLContext;
+import org.jooq.conf.RenderQuotedNames;
+import org.jooq.conf.Settings;
 import org.jooq.impl.DSL; // Import for DSL.using
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.payment.api.PaymentMethodPlugin;
@@ -89,7 +91,10 @@ public class OmPayDao extends PluginPaymentDao<
         final LocalDateTime ldtUtcNow = toLocalDateTime(utcNow); // Use utility from PluginDao
 
         execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             dslContext.insertInto(OMPAY_RESPONSES,
                             OMPAY_RESPONSES.KB_ACCOUNT_ID,
                             OMPAY_RESPONSES.KB_PAYMENT_ID,
@@ -139,7 +144,10 @@ public class OmPayDao extends PluginPaymentDao<
         final LocalDateTime ldtNow = toLocalDateTime(utcNow);
 
         execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             dslContext.insertInto(OMPAY_PAYMENT_METHODS,
                             OMPAY_PAYMENT_METHODS.KB_ACCOUNT_ID,
                             OMPAY_PAYMENT_METHODS.KB_PAYMENT_METHOD_ID,
@@ -168,7 +176,10 @@ public class OmPayDao extends PluginPaymentDao<
 
     public List<PaymentTransactionInfoPlugin> getPaymentInfosForKbPaymentId(final UUID kbPaymentId, final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             return dslContext.selectFrom(OMPAY_RESPONSES)
                     .where(OMPAY_RESPONSES.KB_PAYMENT_ID.eq(kbPaymentId.toString()))
                     .and(OMPAY_RESPONSES.KB_TENANT_ID.eq(kbTenantId.toString()))
@@ -182,7 +193,10 @@ public class OmPayDao extends PluginPaymentDao<
                                                                        final String ompaySuccessfulState,
                                                                        final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             List<OmpayResponsesRecord> records = dslContext.selectFrom(OMPAY_RESPONSES)
                     .where(OMPAY_RESPONSES.KB_PAYMENT_ID.eq(kbPaymentId.toString()))
                     .and(OMPAY_RESPONSES.TRANSACTION_TYPE.eq(transactionType.toString()))
@@ -281,7 +295,10 @@ public class OmPayDao extends PluginPaymentDao<
 
     public OmpayResponsesRecord getResponseByOmPayTransactionId(final String ompayTransactionId, final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             return dslContext.selectFrom(OMPAY_RESPONSES)
                     .where(OMPAY_RESPONSES.OMPAY_TRANSACTION_ID.eq(ompayTransactionId))
                     .and(OMPAY_RESPONSES.KB_TENANT_ID.eq(kbTenantId.toString()))
@@ -293,7 +310,10 @@ public class OmPayDao extends PluginPaymentDao<
 
     public OmpayPaymentMethodsRecord getPaymentMethodByKbPaymentMethodId(final UUID kbPaymentMethodId, final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             return dslContext.selectFrom(OMPAY_PAYMENT_METHODS)
                     .where(OMPAY_PAYMENT_METHODS.KB_PAYMENT_METHOD_ID.eq(kbPaymentMethodId.toString()))
                     .and(OMPAY_PAYMENT_METHODS.KB_TENANT_ID.eq(kbTenantId.toString()))
@@ -305,7 +325,10 @@ public class OmPayDao extends PluginPaymentDao<
     public void markPaymentMethodAsDeleted(final UUID kbPaymentMethodId, final UUID kbTenantId) throws SQLException {
         final LocalDateTime ldtUtcNow = toLocalDateTime(new DateTime(org.joda.time.DateTimeZone.UTC));
         execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             return dslContext.update(OMPAY_PAYMENT_METHODS)
                     .set(OMPAY_PAYMENT_METHODS.IS_DELETED, (short) 1)
                     .set(OMPAY_PAYMENT_METHODS.UPDATED_DATE, ldtUtcNow)
@@ -318,7 +341,10 @@ public class OmPayDao extends PluginPaymentDao<
     public void clearDefault(final UUID kbAccountId, final UUID kbTenantId) throws SQLException {
         final LocalDateTime ldtUtcNow = toLocalDateTime(new DateTime(org.joda.time.DateTimeZone.UTC));
         execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             return dslContext.update(OMPAY_PAYMENT_METHODS)
                     .set(OMPAY_PAYMENT_METHODS.IS_DEFAULT, (short) 0)
                     .set(OMPAY_PAYMENT_METHODS.UPDATED_DATE, ldtUtcNow)
@@ -332,7 +358,10 @@ public class OmPayDao extends PluginPaymentDao<
     public void setDefaultPaymentMethod(final UUID kbPaymentMethodId, final UUID kbTenantId) throws SQLException {
         final LocalDateTime ldtUtcNow = toLocalDateTime(new DateTime(org.joda.time.DateTimeZone.UTC));
         execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             return dslContext.update(OMPAY_PAYMENT_METHODS)
                     .set(OMPAY_PAYMENT_METHODS.IS_DEFAULT, (short) 1)
                     .set(OMPAY_PAYMENT_METHODS.UPDATED_DATE, ldtUtcNow)
@@ -344,7 +373,10 @@ public class OmPayDao extends PluginPaymentDao<
 
     public void updateResponseAdditionalData(Integer recordId, String state, String additionalData) throws SQLException {
         execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             return dslContext.update(OMPAY_RESPONSES)
                     .set(OMPAY_RESPONSES.OMPAY_STATE, state)
                     .set(OMPAY_RESPONSES.ADDITIONAL_DATA, additionalData)
@@ -370,7 +402,10 @@ public class OmPayDao extends PluginPaymentDao<
     @Nullable
     public String getOmpayPayerIdForAccount(final UUID kbAccountId, final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
             return dslContext.select(OMPAY_PAYMENT_METHODS.OMPAY_PAYER_ID)
                     .from(OMPAY_PAYMENT_METHODS)
                     .where(OMPAY_PAYMENT_METHODS.KB_ACCOUNT_ID.eq(kbAccountId.toString()))
@@ -392,7 +427,10 @@ public class OmPayDao extends PluginPaymentDao<
         final LocalDateTime ldtNow = toLocalDateTime(utcNow);
 
         execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
 
             // 1. Get all current local PMs for this kbAccountId that have this ompayPayerId
             List<OmpayPaymentMethodsRecord> localPms = dslContext.selectFrom(OMPAY_PAYMENT_METHODS)
@@ -499,7 +537,10 @@ public class OmPayDao extends PluginPaymentDao<
      */
     public List<PaymentTransactionInfoPlugin> searchPayments(final String searchKey, final Long offset, final Long limit, final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
 
             // Search across multiple fields - using ILIKE for case-insensitive search in PostgreSQL
             Condition searchCondition = OMPAY_RESPONSES.KB_PAYMENT_ID.likeIgnoreCase("%" + searchKey + "%")
@@ -529,7 +570,10 @@ public class OmPayDao extends PluginPaymentDao<
      */
     public Long getPaymentCount(final String searchKey, final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
 
             Condition searchCondition = OMPAY_RESPONSES.KB_PAYMENT_ID.likeIgnoreCase("%" + searchKey + "%")
                     .or(OMPAY_RESPONSES.KB_PAYMENT_TRANSACTION_ID.likeIgnoreCase("%" + searchKey + "%"))
@@ -558,7 +602,10 @@ public class OmPayDao extends PluginPaymentDao<
      */
     public List<PaymentMethodPlugin> searchPaymentMethods(final String searchKey, final Long offset, final Long limit, final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
 
             // Search across multiple fields
             Condition searchCondition = OMPAY_PAYMENT_METHODS.KB_PAYMENT_METHOD_ID.likeIgnoreCase("%" + searchKey + "%")
@@ -592,7 +639,10 @@ public class OmPayDao extends PluginPaymentDao<
      */
     public Long getPaymentMethodCount(final String searchKey, final UUID kbTenantId) throws SQLException {
         return execute(dataSource.getConnection(), (Connection conn) -> {
-            final DSLContext dslContext = DSL.using(conn, dialect, settings);
+            // Override settings to force lowercase table names
+            final Settings lowercaseSettings = new Settings()
+                    .withRenderQuotedNames(RenderQuotedNames.NEVER);
+            final DSLContext dslContext = DSL.using(conn, dialect, lowercaseSettings);
 
             Condition searchCondition = OMPAY_PAYMENT_METHODS.KB_PAYMENT_METHOD_ID.likeIgnoreCase("%" + searchKey + "%")
                     .or(OMPAY_PAYMENT_METHODS.KB_ACCOUNT_ID.likeIgnoreCase("%" + searchKey + "%"))

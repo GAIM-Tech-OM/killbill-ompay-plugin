@@ -24,7 +24,7 @@
     </parent>
     <groupId>org.kill-bill.billing.plugin.java</groupId>
     <artifactId>ompay-plugin</artifactId>
-    <version>0.0.2</version>
+    <version>0.0.3</version>
     <packaging>bundle</packaging>
     <name>Kill Bill Ompay plugin</name>
     <description>Kill Bill Ompay plugin</description>
