@@ -1,3 +1,18 @@
+/*
+ * Copyright 2025 GAIM-TECH-OM
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ */
 package org.killbill.billing.plugin.ompay;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -47,13 +62,14 @@ import java.util.Optional;
 @Path("/process-nonce")
 public class OmPayNonceHandlerServlet extends PluginServlet {
 
+    private static final long serialVersionUID = 1L;
     private static final Logger logger = LoggerFactory.getLogger(OmPayNonceHandlerServlet.class);
-    private final OmPayPaymentPluginApi paymentPluginApi;
-    private final OmPayConfigurationHandler configurationHandler;
-    private final OSGIKillbillAPI killbillAPI;
-    private final OSGIKillbillClock clock;
-    private final OmPayDao dao;
-    private final OmPayHttpClient httpClient;
+    private final transient OmPayPaymentPluginApi paymentPluginApi;
+    private final transient OmPayConfigurationHandler configurationHandler;
+    private final transient OSGIKillbillAPI killbillAPI;
+    private final transient OSGIKillbillClock clock;
+    private final transient OmPayDao dao;
+    private final transient OmPayHttpClient httpClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Inject

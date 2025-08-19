@@ -1,3 +1,18 @@
+/*
+ * Copyright 2025 GAIM-TECH-OM
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ */
 package org.killbill.billing.plugin.ompay;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -1181,7 +1196,7 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
                 @Override public Long getNextOffset() {
                     return results.size() < limit ? null : offset + limit;
                 }
-                @Override public Long getMaxNbRecords() { return (long) limit; }
+                @Override public Long getMaxNbRecords() { return limit; }
                 @Override public Long getTotalNbRecords() {
                     try {
                         return dao.getPaymentCount(searchKey, context.getTenantId());
@@ -1218,7 +1233,7 @@ public class OmPayPaymentPluginApi implements PaymentPluginApi {
                 @Override public Long getNextOffset() {
                     return results.size() < limit ? null : offset + limit;
                 }
-                @Override public Long getMaxNbRecords() { return (long) limit; }
+                @Override public Long getMaxNbRecords() { return limit; }
                 @Override public Long getTotalNbRecords() {
                     try {
                         return dao.getPaymentMethodCount(searchKey, context.getTenantId());
